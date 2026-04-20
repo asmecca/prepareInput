@@ -10,7 +10,7 @@ using std::cout;
 using std::cerr;
 using std::endl;
 
-/// write the list of called routines
+/// Write the list of called routines
 void print_backtrace_list()
 {
   void *callstack[128];
@@ -24,9 +24,10 @@ void print_backtrace_list()
   free(strs);
 }
 
-#define CRASH(...) internal_crash(__LINE__,__FILE__,__PRETTY_FUNCTION__,__VA_ARGS__)
+#define CRASH(...) \
+  internal_crash(__LINE__,__FILE__,__PRETTY_FUNCTION__,__VA_ARGS__)
 
-/// crashes emitting the message
+/// Crashes emitting the message
 __attribute__ ((format (printf,4,5)))
 void internal_crash(const int& line,
 		    const char* file,
@@ -47,34 +48,41 @@ void internal_crash(const int& line,
 
 /////////////////////////////////////////////////////////////////
 
+/// Holds three components of the momentum
 struct Mom :
   std::array<double,3>
 {
 };
 
+/// Negate a momentum
 Mom operator-(const Mom& y)
 {
   return {-y[0],-y[1],-y[2]};
 }
 
+/// Product of a scalar with a momentum
 Mom operator*(const double& x,
 	      const Mom& y)
 {
   return {y[0]*x,y[1]*x,y[2]*x};
 }
 
+/// Product of a momentum with a scalar
 Mom operator*(const Mom& x,
 	      const double& y)
 {
   return y*x;
 }
 
+/////////////////////////////////////////////////////////////////
 
 struct Smear;
 
 struct Phase;
 
 struct Gamma;
+
+struct Oper;
 
 /////////////////////////////////////////////////////////////////
 
@@ -89,6 +97,10 @@ struct Smear
   Smear dag() const
   {
     return *this;
+  }
+  
+  void print(const std::vector<Oper>& source) const
+  {
   }
 };
 
@@ -137,8 +149,6 @@ Pars dag(const Pars& pars)
 	return o.dag();
       },pars);
 };
-
-struct Oper;
 
 Oper operator*(const Oper& a,
 	       const Oper& b);
