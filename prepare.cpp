@@ -1,6 +1,8 @@
 #include <array>
 #include <cstdarg>
 #include <cstddef>
+#include <map>
+#include <sstream>
 #include <iostream>
 #include <execinfo.h>
 #include <variant>
@@ -54,6 +56,12 @@ struct Mom :
 {
 };
 
+std::ostream& operator<<(std::ostream& os,
+			 const Mom& mom)
+{
+  return os<<"{"<<mom[0]<<","<<mom[1]<<","<<mom[2]<<"}";
+}
+
 /// Negate a momentum
 Mom operator-(const Mom& y)
 {
@@ -99,14 +107,20 @@ struct Smear
     return *this;
   }
   
-  void print(const std::vector<Oper>& source) const
+  std::string describe() const
   {
+    return (std::ostringstream()<<"smear(kappa="<<kappa<<",n="<<n<<",mom="<<mom<<")").str();
   }
 };
 
 struct Phase
 {
   Mom mom;
+  
+  std::string describe() const
+  {
+    return (std::ostringstream()<<"phase(mom="<<mom<<")").str();
+  }
   
   Phase dag() const
   {
@@ -122,6 +136,11 @@ struct Gamma
 {
   size_t iGamma{};
   
+  std::string describe() const
+  {
+    return (std::ostringstream()<<"gamma(iGamma="<<iGamma<<")").str();
+  }
+  
   Gamma dag() const
   {
     return *this;
@@ -131,6 +150,11 @@ struct Gamma
 struct DeltaT
 {
   size_t t;
+  
+  std::string describe() const
+  {
+    return (std::ostringstream()<<"deltaT(t="<<t<<")").str();
+  }
   
   DeltaT dag() const
   {
@@ -148,7 +172,16 @@ Pars dag(const Pars& pars)
       {
 	return o.dag();
       },pars);
-};
+}
+
+std::string describe(const Pars& pars)
+{
+  return
+    std::visit([](const auto& o) -> std::string
+      {
+	return o.describe();
+      },pars);
+}
 
 Oper operator*(const Oper& a,
 	       const Oper& b);
@@ -159,7 +192,7 @@ struct Oper
   
   std::vector<Oper> source;
   
-  /// Dagger of an operation is meaning
+  /// Dagger of an operation
   Oper dag() const
   {
     if(source.size()>1)
@@ -185,15 +218,40 @@ struct Oper
     pars{pars}
   {
   }
+  
+  std::string describe() const
+  {
+    std::string t=::describe(pars);
+    
+    if(source.size())
+      {
+	t+="*";
+	if(source.size()>1)
+	  t+="(";
+	t+=source[0].describe();
+	
+	for(size_t i=1;i<source.size();i++)
+	  t+=","+source[i].describe();
+	if(source.size()>1)
+	  t+=")";
+      }
+    
+    return t;
+  }
+  
+  void compile(std::map<std::string,Pars>& out) const
+  {
+    cout<<describe()<<endl;
+  }
 };
 
 Oper operator*(const Oper& a,
 	       const Oper& b)
 {
   if(a.source.size())
-    CRASH("lhs has already a source");
-  
-  return Oper(a.pars,{b});
+    return a.pars*(a.source.front()*b);
+  else
+    return Oper(a.pars,{b});
 }
 
 /////////////////////////////////////////////////////////////////
@@ -205,7 +263,9 @@ int main()
   const Smear sme{.kappa=0.4,.n=40,.mom=mom};
   const Phase phase{.mom=2*mom};
   
-  const Oper op=sme*phase*sme.dag();
+  const Oper op=(sme*phase*sme).dag();
+  
+  cout<<op.describe()<<endl;
   
   return 0;
 }
