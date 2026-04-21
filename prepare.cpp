@@ -93,6 +93,8 @@ struct Gamma;
 
 struct Oper;
 
+struct Source;
+
 /////////////////////////////////////////////////////////////////
 
 struct Smear
@@ -112,6 +114,8 @@ struct Smear
   {
     return (std::ostringstream()<<"smear(kappa="<<kappa<<",n="<<n<<",mom="<<mom<<")").str();
   }
+  
+  bool operator<=>(const Smear&) const=default;
 };
 
 struct Phase
@@ -131,6 +135,8 @@ struct Phase
     
     return res;
   }
+  
+  bool operator<=>(const Phase&) const=default;
 };
 
 struct Gamma
@@ -146,6 +152,8 @@ struct Gamma
   {
     return *this;
   }
+  
+  bool operator<=>(const Gamma&) const=default;
 };
 
 struct DeltaT
@@ -161,10 +169,43 @@ struct DeltaT
   {
     return *this;
   }
+  
+  bool operator<=>(const DeltaT&) const=default;
 };
 
+struct Source
+{
+  inline static size_t count{};
+  
+  std::string describe() const
+  {
+    return (std::ostringstream()<<"source(count="<<count<<")").str();
+  }
+  
+  Source()
+  {
+    count++;
+  }
+  
+  Source dag() const
+  {
+    CRASH("Cannot take the dag of a source");
+    
+    return *this;
+  }
+  
+  bool operator<=>(const Source&) const=default;
+};
+
+/////////////////////////////////////////////////////////////////
+
 using Pars=
-  std::variant<Smear,Phase,Gamma,DeltaT>;
+  std::variant<Smear,Phase,Gamma,DeltaT,Source>;
+
+bool isSource(const Pars& pars)
+{
+  return std::holds_alternative<Source>(pars);
+}
 
 Pars dag(const Pars& pars)
 {
@@ -194,17 +235,25 @@ struct UnorderedInstructions
 {
   std::vector<Command> instructions;
   
-  void tryEmplace(const size_t& lhs,const Pars& pars,const std::vector<size_t>& sources)
+  void tryEmplace(const size_t& lhs,
+		  const Pars& pars,
+		  const std::vector<size_t>& sources)
   {
-    if(const auto it=std::find_if(instructions.begin(),
-				  instructions.end(),
-				  [&lhs](const Command& command)
-				  {
-				    return std::get<0>(command)==lhs;
-				  });it!=instructions.end())
-      CRASH("lhs %zu already present, watchout for collision!",lhs);
+    const auto it=
+      std::find_if(instructions.begin(),
+		   instructions.end(),
+		   [&lhs](const Command& command)
+		   {
+		     return std::get<0>(command)==lhs;
+		   });
     
-    instructions.emplace_back(lhs,pars,sources);
+    if(it!=instructions.end())
+      if(std::get<1>(*it)!=pars or std::get<2>(*it)!=sources)
+	CRASH("lhs %zu already present, watchout for collision!",lhs);
+      else
+	return;
+    else
+      instructions.emplace_back(lhs,pars,sources);
   }
 };
 
@@ -226,7 +275,7 @@ struct Executable
     bool are{true};
     auto it=rhs.begin();
     while(are and it!=rhs.end())
-      are&=contains(*it);
+      are&=contains(*it++);
     
     return are;
   }
@@ -304,17 +353,17 @@ struct Oper
     
     out.tryEmplace(lhs,pars,rhs);
   }
-  
-  UnorderedInstructions compile() const
-  {
-    UnorderedInstructions res;
-    
-    compile(res);
-    
-    return res;
-    
-  }
 };
+
+UnorderedInstructions compile(const std::vector<Oper>& operations)
+{
+  UnorderedInstructions res;
+  
+  for(const Oper& oper : operations)
+    oper.compile(res);
+  
+  return res;
+}
 
 Oper operator*(const Oper& a,
 	       const Oper& b)
@@ -339,31 +388,45 @@ int main()
   const Smear sme{.kappa=0.4,.n=40,.mom=mom};
   const Phase phase{.mom=2*mom};
   
-  const Oper op=(sme*phase*sme).dag();
+  std::vector<Oper> operations;
+  operations.push_back((sme*phase*sme).dag()*Source{});
+  operations.push_back(phase*sme*sme*Source{});
   
-  cout<<op.describe()<<endl;
+  cout<<"List of operations:"<<endl;
+  for(const Oper& oper : operations)
+    cout<<" "<<oper.describe()<<endl;
+  cout<<endl;
   
   const auto describe=
     [](const Command& command)
     {
       const auto& [lhs,pars,sources]=command;
       
-      if(sources.size()==0)
+      if(sources.size()==0 and not isSource(pars))
 	CRASH("rhs with pars %s has zero sources",::describe(pars).c_str());
       
       std::ostringstream os;
-      os<<lhs<<" =" <<::describe(pars)<<" * ";
-      if(sources.size()>1)
-	os<<"(";
-      for(size_t i{};const size_t& source : sources)
-	os<<((i++)?"+":"")<<source;
-      if(sources.size()>1)
-	os<<")";
+      os<<lhs<<" = " <<::describe(pars);
       
+      if(sources.size())
+	{
+	  os<<" * ";
+	  if(sources.size()>1)
+	    os<<"(";
+	  for(size_t i{};const size_t& source : sources)
+	    os<<((i++)?"+":"")<<source;
+	  if(sources.size()>1)
+	    os<<")";
+	}
+	
       return os.str();
     };
   
-  const UnorderedInstructions unorderedInstructions=op.compile();
+  const UnorderedInstructions unorderedInstructions=compile(operations);
+  cout<<"Unordered instructions ("<<unorderedInstructions.instructions.size()<<" instr):"<<endl;
+  for(const Command& command : unorderedInstructions.instructions)
+    cout<<" "<<describe(command)<<endl;
+  cout<<endl;
   
   Executable executable;
   
@@ -394,14 +457,19 @@ int main()
       
       cout<<"Eligible commands:"<<endl;
       for(const auto& [iLhs,nDep] : eligibleCommands)
-	cout<<describe(unorderedInstructions.instructions[iLhs])<<" holds "<<nDep<<" other instructions"<<endl;
+	cout<<" "<<describe(unorderedInstructions.instructions[iLhs])<<" holds "<<nDep<<" other instructions"<<endl;
       cout<<endl;
       
       if(eligibleCommands.empty())
 	CRASH("no eligible command");
       
-      executable.instructions.push_back(unorderedInstructions.instructions[eligibleCommands.front().first]);
+      executable.instructions.push_back(unorderedInstructions.instructions[eligibleCommands.back().first]);
     }
+  
+  cout<<"Final program:"<<endl;
+  for(const Command& command : executable.instructions)
+    cout<<" "<<describe(command)<<endl;
+  cout<<endl;
   
   return 0;
 }
