@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cstdarg>
 #include <cstddef>
@@ -186,6 +187,51 @@ std::string describe(const Pars& pars)
 Oper operator*(const Oper& a,
 	       const Oper& b);
 
+using Command=
+  std::tuple<size_t,Pars,std::vector<size_t>>;
+
+struct UnorderedInstructions
+{
+  std::vector<Command> instructions;
+  
+  void tryEmplace(const size_t& lhs,const Pars& pars,const std::vector<size_t>& sources)
+  {
+    if(const auto it=std::find_if(instructions.begin(),
+				  instructions.end(),
+				  [&lhs](const Command& command)
+				  {
+				    return std::get<0>(command)==lhs;
+				  });it!=instructions.end())
+      CRASH("lhs %zu already present, watchout for collision!",lhs);
+    
+    instructions.emplace_back(lhs,pars,sources);
+  }
+};
+
+struct Executable
+{
+  std::vector<Command> instructions;
+  
+  bool contains(const size_t& lhs) const
+  {
+    return std::find_if(instructions.begin(),instructions.end(),
+			[&lhs](const Command& command)
+			{
+			  return lhs==std::get<0>(command);
+			})!=instructions.end();
+  }
+  
+  bool contains(const std::vector<size_t>& rhs) const
+  {
+    bool are{true};
+    auto it=rhs.begin();
+    while(are and it!=rhs.end())
+      are&=contains(*it);
+    
+    return are;
+  }
+};
+
 struct Oper
 {
   Pars pars;
@@ -239,19 +285,49 @@ struct Oper
     return t;
   }
   
-  void compile(std::map<std::string,Pars>& out) const
+  size_t hash() const
   {
-    cout<<describe()<<endl;
+    return std::hash<std::string>{}(describe());
+  }
+  
+  void compile(UnorderedInstructions& out) const
+  {
+    const size_t lhs=hash();
+    
+    std::vector<size_t> rhs;
+    
+    for(const Oper& si : source)
+      {
+	si.compile(out);
+	rhs.push_back(si.hash());
+      }
+    
+    out.tryEmplace(lhs,pars,rhs);
+  }
+  
+  UnorderedInstructions compile() const
+  {
+    UnorderedInstructions res;
+    
+    compile(res);
+    
+    return res;
+    
   }
 };
 
 Oper operator*(const Oper& a,
 	       const Oper& b)
 {
+  Oper c(a.pars);
+  
   if(a.source.size())
-    return a.pars*(a.source.front()*b);
+    for(const Oper& ai : a.source)
+      c.source.push_back(ai*b);
   else
-    return Oper(a.pars,{b});
+    c.source.push_back(b);
+  
+  return c;
 }
 
 /////////////////////////////////////////////////////////////////
@@ -266,6 +342,66 @@ int main()
   const Oper op=(sme*phase*sme).dag();
   
   cout<<op.describe()<<endl;
+  
+  const auto describe=
+    [](const Command& command)
+    {
+      const auto& [lhs,pars,sources]=command;
+      
+      if(sources.size()==0)
+	CRASH("rhs with pars %s has zero sources",::describe(pars).c_str());
+      
+      std::ostringstream os;
+      os<<lhs<<" =" <<::describe(pars)<<" * ";
+      if(sources.size()>1)
+	os<<"(";
+      for(size_t i{};const size_t& source : sources)
+	os<<((i++)?"+":"")<<source;
+      if(sources.size()>1)
+	os<<")";
+      
+      return os.str();
+    };
+  
+  const UnorderedInstructions unorderedInstructions=op.compile();
+  
+  Executable executable;
+  
+  std::map<size_t,size_t> dependenciesMultiplicity;
+  for(const auto& [lhs,pars,sources] : unorderedInstructions.instructions)
+    for(const size_t& source : sources)
+     dependenciesMultiplicity[source]++;
+  
+  while(executable.instructions.size()!=unorderedInstructions.instructions.size())
+    {
+      cout<<"NResidual instructions: "<<unorderedInstructions.instructions.size()-executable.instructions.size()<<endl;
+      
+      std::vector<std::pair<size_t,size_t>> eligibleCommands;
+      
+      for(size_t i=0;const auto& [lhs,pars,sources] : unorderedInstructions.instructions)
+	{
+	  if(not executable.contains(lhs) and executable.contains(sources))
+	    eligibleCommands.emplace_back(i,dependenciesMultiplicity[lhs]);
+	  
+	  i++;
+	}
+      
+      std::sort(eligibleCommands.begin(),eligibleCommands.end(),[](const std::pair<size_t,size_t>& a,
+								   const std::pair<size_t,size_t>& b)
+      {
+	return a.second<b.second;
+      });
+      
+      cout<<"Eligible commands:"<<endl;
+      for(const auto& [iLhs,nDep] : eligibleCommands)
+	cout<<describe(unorderedInstructions.instructions[iLhs])<<" holds "<<nDep<<" other instructions"<<endl;
+      cout<<endl;
+      
+      if(eligibleCommands.empty())
+	CRASH("no eligible command");
+      
+      executable.instructions.push_back(unorderedInstructions.instructions[eligibleCommands.front().first]);
+    }
   
   return 0;
 }
