@@ -52,32 +52,32 @@ void internal_crash(const int& line,
 /////////////////////////////////////////////////////////////////
 
 /// Holds three components of the momentum
-struct Mom :
+struct Momentum :
   std::array<double,3>
 {
 };
 
 std::ostream& operator<<(std::ostream& os,
-			 const Mom& mom)
+			 const Momentum& mom)
 {
   return os<<"{"<<mom[0]<<","<<mom[1]<<","<<mom[2]<<"}";
 }
 
 /// Negate a momentum
-Mom operator-(const Mom& y)
+Momentum operator-(const Momentum& y)
 {
   return {-y[0],-y[1],-y[2]};
 }
 
 /// Product of a scalar with a momentum
-Mom operator*(const double& x,
-	      const Mom& y)
+Momentum operator*(const double& x,
+	      const Momentum& y)
 {
   return {y[0]*x,y[1]*x,y[2]*x};
 }
 
 /// Product of a momentum with a scalar
-Mom operator*(const Mom& x,
+Momentum operator*(const Momentum& x,
 	      const double& y)
 {
   return y*x;
@@ -103,7 +103,7 @@ struct Smear
   
   double n{};
   
-  Mom mom{};
+  Momentum mom{};
   
   Smear dag() const
   {
@@ -120,7 +120,7 @@ struct Smear
 
 struct Phase
 {
-  Mom mom;
+  Momentum mom;
   
   std::string describe() const
   {
@@ -175,7 +175,9 @@ struct DeltaT
 
 struct Source
 {
-  inline static size_t count{};
+  inline static size_t glbCount{};
+  
+  size_t count;
   
   std::string describe() const
   {
@@ -184,7 +186,7 @@ struct Source
   
   Source()
   {
-    count++;
+    count=glbCount++;
   }
   
   Source dag() const
@@ -197,10 +199,43 @@ struct Source
   bool operator<=>(const Source&) const=default;
 };
 
+struct Prop
+{
+  double kappa{};
+  
+  double mass{};
+  
+  int r{};
+  
+  double charge{};
+  
+  Momentum mom{};
+  
+  double residue{};
+  
+  std::string describe() const
+  {
+    return (std::ostringstream()<<"prop(kappa="<<kappa<<",mass="<<mass<<",r="<<r<<",charge="<<charge<<",mom="<<mom<<",residue="<<residue<<")").str();
+  }
+  
+  Prop dag() const
+  {
+    Prop res=*this;
+    
+    res.r=-r;
+    
+    res.mom=-mom;
+    
+    return *this;
+  }
+  
+  bool operator<=>(const Prop&) const=default;
+};
+
 /////////////////////////////////////////////////////////////////
 
 using Pars=
-  std::variant<Smear,Phase,Gamma,DeltaT,Source>;
+  std::variant<Smear,Phase,Gamma,DeltaT,Source,Prop>;
 
 bool isSource(const Pars& pars)
 {
@@ -383,14 +418,19 @@ Oper operator*(const Oper& a,
 
 int main()
 {
-  const Mom mom{0,1,0};
+  const Momentum mom{0,1,0};
   
   const Smear sme{.kappa=0.4,.n=40,.mom=mom};
   const Phase phase{.mom=2*mom};
   
+  Prop prop{.kappa=0.133,.mass=0.02,.r=1,.charge=0.0,.residue=0.0011};
+  
+  
+  
   std::vector<Oper> operations;
-  operations.push_back((sme*phase*sme).dag()*Source{});
-  operations.push_back(phase*sme*sme*Source{});
+  Source eta{};
+  operations.push_back((prop*sme*phase*sme).dag()*eta);
+  operations.push_back(phase*sme*sme*eta);
   
   cout<<"List of operations:"<<endl;
   for(const Oper& oper : operations)
