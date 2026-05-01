@@ -3,6 +3,8 @@
 #include <cstdarg>
 #include <cstddef>
 #include <map>
+#include <memory>
+#include <numeric>
 #include <sstream>
 #include <iostream>
 #include <execinfo.h>
@@ -12,6 +14,34 @@
 using std::cout;
 using std::cerr;
 using std::endl;
+
+/// Overload pattern
+template <typename...Ts>
+struct Overload :
+  Ts...
+{
+  using Ts::operator()...;
+};
+
+/// Deducing guide for overload pattern
+template <typename...Ts>
+Overload(Ts...) -> Overload<Ts...>;
+
+/// Cat a list of types to a variant
+template <typename V,
+	  typename...T>
+struct _VariantCat;
+
+template <typename...V,
+	  typename...T>
+struct _VariantCat<std::variant<V...>,T...>
+{
+  using type=std::variant<V...,T...>;
+};
+
+template <typename V,
+	  typename...T>
+using VariantCat=typename _VariantCat<V,T...>::type;
 
 /// Write the list of called routines
 void print_backtrace_list()
@@ -78,7 +108,7 @@ Momentum operator*(const double& x,
 
 /// Product of a momentum with a scalar
 Momentum operator*(const Momentum& x,
-	      const double& y)
+		   const double& y)
 {
   return y*x;
 }
@@ -92,8 +122,6 @@ struct Phase;
 struct Gamma;
 
 struct Oper;
-
-struct Source;
 
 /////////////////////////////////////////////////////////////////
 
@@ -173,32 +201,6 @@ struct DeltaT
   bool operator<=>(const DeltaT&) const=default;
 };
 
-struct Source
-{
-  inline static size_t glbCount{};
-  
-  size_t count;
-  
-  std::string describe() const
-  {
-    return (std::ostringstream()<<"source(count="<<count<<")").str();
-  }
-  
-  Source()
-  {
-    count=glbCount++;
-  }
-  
-  Source dag() const
-  {
-    CRASH("Cannot take the dag of a source");
-    
-    return *this;
-  }
-  
-  bool operator<=>(const Source&) const=default;
-};
-
 struct Prop
 {
   double kappa{};
@@ -235,12 +237,7 @@ struct Prop
 /////////////////////////////////////////////////////////////////
 
 using Pars=
-  std::variant<Smear,Phase,Gamma,DeltaT,Source,Prop>;
-
-bool isSource(const Pars& pars)
-{
-  return std::holds_alternative<Source>(pars);
-}
+  std::variant<Smear,Phase,Gamma,DeltaT,Prop>;
 
 Pars dag(const Pars& pars)
 {
@@ -264,7 +261,7 @@ Oper operator*(const Oper& a,
 	       const Oper& b);
 
 using Command=
-  std::tuple<size_t,Pars,std::vector<size_t>>;
+  std::tuple<size_t,Pars,int,size_t>;
 
 struct UnorderedInstructions
 {
@@ -272,7 +269,8 @@ struct UnorderedInstructions
   
   void tryEmplace(const size_t& lhs,
 		  const Pars& pars,
-		  const std::vector<size_t>& sources)
+		  const int& t,
+		  const size_t& sources)
   {
     const auto it=
       std::find_if(instructions.begin(),
@@ -283,12 +281,12 @@ struct UnorderedInstructions
 		   });
     
     if(it!=instructions.end())
-      if(std::get<1>(*it)!=pars or std::get<2>(*it)!=sources)
+      if(std::get<1>(*it)!=pars or std::get<2>(*it)!=t or std::get<3>(*it)!=sources)
 	CRASH("lhs %zu already present, watchout for collision!",lhs);
       else
 	return;
     else
-      instructions.emplace_back(lhs,pars,sources);
+      instructions.emplace_back(lhs,pars,t,sources);
   }
 };
 
@@ -320,99 +318,348 @@ struct Oper
 {
   Pars pars;
   
-  std::vector<Oper> source;
+  std::unique_ptr<Oper> rhs;
   
+  // std::variant<Pars,std::vector<std::pair<double,Oper>>> pars;
+  
+  // template <typename T>
+  // requires std::constructible_from<decltype(pars),T>
+  // Oper(const T& args) :
+  //   pars{args}
+  // {
+  // }
+  
+  // Oper asList() const
+  // {
+  //   if(std::holds_alternative<Pars>(pars))
+  //     return std::vector{std::make_pair(1.0,*this)};
+  //   else
+  //     return *this;
   /// Dagger of an operation
   Oper dag() const
   {
-    if(source.size()>1)
-      CRASH("source.size()=%zu greater than 1",source.size());
-    
     const Pars dagPars=
       ::dag(pars);
     
-    if(source.size()==0)
-      return dagPars;
+    if(rhs)
+      return rhs->dag()*dagPars;
     else
-      return source[0].dag()*dagPars;
+      return dagPars;
+  }
+  
+  Oper(const Oper& oth) :
+    pars{oth.pars},rhs{oth.rhs?std::make_unique<Oper>(*oth.rhs):nullptr}
+  {
   }
   
   Oper(const Pars& pars,
-       const std::vector<Oper>& source) :
-    pars{pars},source(source)
+       const Oper& rhs) :
+    pars{pars},rhs(std::make_unique<Oper>(rhs))
   {
   }
   
   template <typename T>
+  requires std::constructible_from<decltype(pars),T>
   Oper(const T& pars) :
-    pars{pars}
+     pars{pars}
+  {
+  }
+  
+  // std::string describe() const
+  // {
+  //   std::string t=::describe(pars);
+    
+  //   if(rhs)
+  //     t+="*"+rhs->describe();
+    
+  //   return t;
+  // }
+  
+  // size_t hash() const
+  // {
+  //   return std::hash<std::string>{}(describe());
+  // }
+};
+
+Oper operator*(const Oper& a,
+	       const Oper& b)
+{
+  Oper c(a);
+  
+  Oper* d=&c;
+  while(d->rhs)
+    d=&*d->rhs;
+  
+  d->rhs=std::make_unique<Oper>(b);
+  
+  return c;
+}
+
+struct Source
+{
+  inline static size_t glbCount{};
+  
+  size_t count;
+  
+  std::string describe() const
+  {
+    return (std::ostringstream()<<"source(count="<<count<<")").str();
+  }
+  
+  Source()
+  {
+    count=glbCount++;
+  }
+};
+
+struct Line;
+
+struct Extender
+{
+  Pars pars;
+  
+  std::vector<std::pair<double,Line>> rhs;
+  
+  int tSelect{-1};
+  
+  std::string describe() const;
+};
+
+struct Line
+{
+  std::variant<Extender,Source> data;
+  
+  size_t maybeRemoveDeltaT()
+  {
+    return
+      std::visit(Overload{[](Extender& extender) -> size_t
+      {
+	const DeltaT* dt=
+	  std::get_if<DeltaT>(&extender.pars);
+	
+	size_t n=
+	  dt!=nullptr;
+	
+	if(n)
+	  {
+	    extender.tSelect=dt->t;
+	    extender.pars=Gamma{0};
+	  }
+	
+	for(auto& [w,l] : extender.rhs)
+	  n+=l.maybeRemoveDeltaT();
+	
+      return n;
+      },
+	    [](Source& source) -> size_t
+	    {
+	      return 0;
+	    }},data);
+  }
+  
+  Line(const Pars& pars,
+       const std::vector<std::pair<double,Line>>& rhs,
+       const int tSelect=-1) :
+    data{Extender{pars,rhs,tSelect}}
+  {
+    maybeRemoveDeltaT();
+  }
+  
+  Line(const Oper& oper,
+       const Line& line) :
+    data(Extender{oper.pars})
+  {
+    Extender& e=*std::get_if<Extender>(&data);
+    
+    if(oper.rhs)
+      e.rhs.emplace_back(1.0,Line(*oper.rhs,line));
+    else
+      e.rhs.emplace_back(1.0,line);
+    
+    maybeRemoveDeltaT();
+  }
+  
+  Line(const Line&)=default;
+  
+  template <typename T>
+  requires std::constructible_from<decltype(data),T>
+  Line(const T& data) :
+    data{data}
   {
   }
   
   std::string describe() const
   {
-    std::string t=::describe(pars);
-    
-    if(source.size())
+    return
+      std::visit([](const auto& e)
       {
-	t+="*";
-	if(source.size()>1)
-	  t+="(";
-	t+=source[0].describe();
-	
-	for(size_t i=1;i<source.size();i++)
-	  t+=","+source[i].describe();
-	if(source.size()>1)
-	  t+=")";
-      }
-    
-    return t;
-  }
-  
-  size_t hash() const
-  {
-    return std::hash<std::string>{}(describe());
-  }
-  
-  void compile(UnorderedInstructions& out) const
-  {
-    const size_t lhs=hash();
-    
-    std::vector<size_t> rhs;
-    
-    for(const Oper& si : source)
-      {
-	si.compile(out);
-	rhs.push_back(si.hash());
-      }
-    
-    out.tryEmplace(lhs,pars,rhs);
+	return e.describe();
+      },data);
   }
 };
 
-UnorderedInstructions compile(const std::vector<Oper>& operations)
+std::string Extender::describe() const
 {
-  UnorderedInstructions res;
+  std::ostringstream os;
+  os<<::describe(pars)<<" * ";
   
-  for(const Oper& oper : operations)
-    oper.compile(res);
+  if(rhs.size()==0)
+    CRASH("cannot describe a line extender which does not extend an existing line");
+  else
+    {
+      if(tSelect!=-1)
+	os<<::describe(DeltaT{(size_t)tSelect})<<" * ";
+      
+      if(rhs.size()>1)
+	os<<"( ";
+      
+      for(size_t c{};const auto& [w,line] : rhs)
+	{
+	  if(w<0)
+	    os<<w<<"*";
+	  else
+	    {
+	      if(c)
+		os<<"+";
+	      
+	      if(w!=1.0)
+		os<<w<<"*";
+	    }
+	  
+	  os<<line.describe();
+	  
+	  c++;
+	}
+      
+      if(rhs.size()>1)
+	os<<" )";
+    }
   
-  return res;
+  return os.str();
 }
 
-Oper operator*(const Oper& a,
-	       const Oper& b)
+std::string describe(const Line& line)
 {
-  Oper c(a.pars);
-  
-  if(a.source.size())
-    for(const Oper& ai : a.source)
-      c.source.push_back(ai*b);
-  else
-    c.source.push_back(b);
-  
-  return c;
+  return std::visit([](const auto& v)
+  {
+    return v.describe();
+  },line.data);
 }
+
+size_t maybeRemoveUselessScalar(Line& line)
+{
+  if(Extender* e=std::get_if<Extender>(&line.data))
+    {
+      int nDeep{};
+      for(auto& [w,l] : e->rhs)
+	nDeep+=maybeRemoveUselessScalar(l);
+      
+      const Gamma* g=
+	std::get_if<Gamma>(&e->pars);
+      
+      size_t n=
+	g!=nullptr and g->iGamma==0 and e->tSelect==-1 and e->rhs.size()==1 and e->rhs.front().first==1.0;
+      
+      if(n)
+	line=e->rhs.front().second;
+      
+      return n+nDeep;
+    }
+  else
+    return 0;
+}
+  
+// void compile(UnorderedInstructions& out,
+// 	     std::vector<Source>& sources,
+// 	     const Line& line)
+// {
+//   std::visit(Overload{[&sources](const Source& source)
+//   {
+//     sources.push_back(source);
+//   },
+// 	[](const Extender& lineExtender)
+// 	{
+// 	  if(lineExtender.rhs.size())
+// 	    {
+// 	      const size_t lhsHash=
+// 		std::hash<std::string>{}(describe(linpars));
+	
+// 	rhs->compile(out);
+// 	const size_t rhsHash=this->rhs->hash();
+	
+// 	out.tryEmplace(lhsHash,pars,rhsHash);
+//       }
+// 	}
+// 	},line);
+//   }
+  
+Line operator*(const Oper& oper,
+	       const Line& line)
+{
+  return {oper,line};
+}
+
+Line operator*(const double& c,
+	       const Line& line)
+{
+  return std::visit(Overload{[](const Source& source)->Line
+  {
+    return source;
+  },
+	[&c](const Extender& le)->Line
+	{
+	  Extender res{le};
+	  
+	  for(auto& [w,l] : res.rhs)
+	    w*=c;
+	  
+	  return res;
+	}},line.data);
+}
+
+Line operator*(const Line& line,
+	       const double& c)
+{
+  return c*line;
+}
+
+Line operator+(const Line& a,
+	       const Line& b)
+{
+  if(const Extender *ae=std::get_if<Extender>(&a.data),*be=std::get_if<Extender>(&b.data);ae and be and ae->pars==be->pars)
+    {
+      Extender res=*ae;
+      
+      res.rhs.insert(res.rhs.end(),be->rhs.begin(),be->rhs.end());
+      
+      return res;
+    }
+  else
+    return Extender(Gamma{0},std::vector{std::make_pair(1.0,a),{1.0,b}});
+}
+
+// void compile(UnorderedInstructions& out,
+// 	     const Line& line)
+// {
+  
+//   for(const Oper& oper : operations)
+//     oper.compile(res);
+  
+//   return res;
+// }
+
+// struct Executable
+// {
+//   std::map<std::pair<size_t,size_t>,std::pair<size_t,size_t>> contractions;
+  
+//   void contract(const Line& a,
+// 		const size_t& gSi,
+// 		const Line& b,
+// 		const size_t& gSo)
+//   {
+    
+//   }
+// };
 
 /////////////////////////////////////////////////////////////////
 
@@ -422,94 +669,99 @@ int main()
   
   const Smear sme{.kappa=0.4,.n=40,.mom=mom};
   const Phase phase{.mom=2*mom};
+  const DeltaT deltaT{.t=3};
   
   Prop prop{.kappa=0.133,.mass=0.02,.r=1,.charge=0.0,.residue=0.0011};
   
+  const Oper op1=prop*sme*deltaT;//*phase*sme;
+  const Oper op2=phase*sme*sme;
   
+  std::vector<Oper> operations{op1,op2};
+  // UnorderedInstructions unorderedInstructions=compile(operations);
   
-  std::vector<Oper> operations;
+  // const auto describe=
+  //   [](const Command& command)
+  //   {
+  //     const auto& [lhs,pars,source]=command;
+      
+  //     std::ostringstream os;
+  //     os<<lhs<<" = " <<::describe(pars)<<" * "<<source;
+      
+  //     return os.str();
+  //   };
+  
+  // cout<<"Unordered instructions ("<<unorderedInstructions.instructions.size()<<" instr):"<<endl;
+  // for(const Command& command : unorderedInstructions.instructions)
+  //   cout<<" "<<describe(command)<<endl;
+  // cout<<endl;
+  
   Source eta{};
-  operations.push_back((prop*sme*phase*sme).dag()*eta);
-  operations.push_back(phase*sme*sme*eta);
-  
-  cout<<"List of operations:"<<endl;
-  for(const Oper& oper : operations)
-    cout<<" "<<oper.describe()<<endl;
-  cout<<endl;
-  
-  const auto describe=
-    [](const Command& command)
+  Line a=op1.dag()*eta;
+  // Line b=op2*eta;
+
+  const Oper* o=&op1;
+  while(o)
     {
-      const auto& [lhs,pars,sources]=command;
-      
-      if(sources.size()==0 and not isSource(pars))
-	CRASH("rhs with pars %s has zero sources",::describe(pars).c_str());
-      
-      std::ostringstream os;
-      os<<lhs<<" = " <<::describe(pars);
-      
-      if(sources.size())
-	{
-	  os<<" * ";
-	  if(sources.size()>1)
-	    os<<"(";
-	  for(size_t i{};const size_t& source : sources)
-	    os<<((i++)?"+":"")<<source;
-	  if(sources.size()>1)
-	    os<<")";
-	}
-	
-      return os.str();
-    };
+      cout<<describe(o->pars)<<endl;
+      o=&*o->rhs;
+    }
   
-  const UnorderedInstructions unorderedInstructions=compile(operations);
-  cout<<"Unordered instructions ("<<unorderedInstructions.instructions.size()<<" instr):"<<endl;
-  for(const Command& command : unorderedInstructions.instructions)
-    cout<<" "<<describe(command)<<endl;
-  cout<<endl;
+  
+  
+  cout<<describe(a)<<endl;
+  
+  
+  // b.dag()*a;
+  // std::vector<Oper> operations;
+  // cout<<"List of operations:"<<endl;
+  // for(const Oper& oper : operations)
+  //   cout<<" "<<oper.describe()<<endl;
+  // cout<<endl;
+  
+  
   
   Executable executable;
   
-  std::map<size_t,size_t> dependenciesMultiplicity;
-  for(const auto& [lhs,pars,sources] : unorderedInstructions.instructions)
-    for(const size_t& source : sources)
-     dependenciesMultiplicity[source]++;
+  // std::map<size_t,size_t> dependenciesMultiplicity;
+  // for(const auto& [lhs,pars,sources] : unorderedInstructions.instructions)
+  //   for(const size_t& source : sources)
+  //    dependenciesMultiplicity[source]++;
   
-  while(executable.instructions.size()!=unorderedInstructions.instructions.size())
-    {
-      cout<<"NResidual instructions: "<<unorderedInstructions.instructions.size()-executable.instructions.size()<<endl;
+  // while(executable.instructions.size()!=unorderedInstructions.instructions.size())
+  //   {
+  //     cout<<"NResidual instructions: "<<unorderedInstructions.instructions.size()-executable.instructions.size()<<endl;
       
-      std::vector<std::pair<size_t,size_t>> eligibleCommands;
+  //     std::vector<std::pair<size_t,size_t>> eligibleCommands;
       
-      for(size_t i=0;const auto& [lhs,pars,sources] : unorderedInstructions.instructions)
-	{
-	  if(not executable.contains(lhs) and executable.contains(sources))
-	    eligibleCommands.emplace_back(i,dependenciesMultiplicity[lhs]);
+  //     for(size_t i=0;const auto& [lhs,pars,sources] : unorderedInstructions.instructions)
+  // 	{
+  // 	  if(not executable.contains(lhs) and executable.contains(sources))
+  // 	    eligibleCommands.emplace_back(i,dependenciesMultiplicity[lhs]);
 	  
-	  i++;
-	}
+  // 	  i++;
+  // 	}
       
-      std::sort(eligibleCommands.begin(),eligibleCommands.end(),[](const std::pair<size_t,size_t>& a,
-								   const std::pair<size_t,size_t>& b)
-      {
-	return a.second<b.second;
-      });
+  //     std::sort(eligibleCommands.begin(),eligibleCommands.end(),[](const std::pair<size_t,size_t>& a,
+  // 								   const std::pair<size_t,size_t>& b)
+  //     {
+  // 	return a.second<b.second;
+  //     });
       
-      cout<<"Eligible commands:"<<endl;
-      for(const auto& [iLhs,nDep] : eligibleCommands)
-	cout<<" "<<describe(unorderedInstructions.instructions[iLhs])<<" holds "<<nDep<<" other instructions"<<endl;
-      cout<<endl;
+  //     cout<<"Eligible commands:"<<endl;
+  //     for(const auto& [iLhs,nDep] : eligibleCommands)
+  // 	cout<<" "<<describe(unorderedInstructions.instructions[iLhs])<<" holds "<<nDep<<" other instructions"<<endl;
+  //     cout<<endl;
       
-      if(eligibleCommands.empty())
-	CRASH("no eligible command");
+  //     if(eligibleCommands.empty())
+  // 	CRASH("no eligible command");
       
-      executable.instructions.push_back(unorderedInstructions.instructions[eligibleCommands.back().first]);
-    }
+  //     executable.instructions.push_back(unorderedInstructions.instructions[eligibleCommands.back().first]);
+  //   }
   
-  cout<<"Final program:"<<endl;
-  for(const Command& command : executable.instructions)
-    cout<<" "<<describe(command)<<endl;
-  cout<<endl;
+  // cout<<"Final program:"<<endl;
+  // for(const Command& command : executable.instructions)
+  //   cout<<" "<<describe(command)<<endl;
+  // cout<<endl;
   
   return 0;
 }
