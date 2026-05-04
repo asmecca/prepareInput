@@ -423,11 +423,31 @@ struct Extender
   int tSelect{-1};
   
   std::string describe() const;
+  
+  bool isScalar() const;
+  
+  bool isCombiner() const ;
+  
+  bool isExtendingSource() const;
+  
+  bool isSelectingTime() const
+  {
+    return tSelect!=-1;
+  }
+  
+  Line* maybeGetTrivialRhs();
+  
+  Extender* maybeGetNestedExtender();
 };
 
 struct Line
 {
   std::variant<Extender,Source> data;
+  
+  bool isExtender() const
+  {
+    return std::holds_alternative<Extender>(data);
+  }
   
   size_t maybeRemoveDeltaT()
   {
@@ -498,17 +518,46 @@ struct Line
   }
 };
 
+bool Extender::isScalar() const
+{
+  const Gamma* g=
+    std::get_if<Gamma>(&pars);
+  
+  return
+    g!=nullptr and g->iGamma==0;
+}
+
+bool Extender::isCombiner() const
+{
+  return rhs.size()>1 or (rhs.size()==1 and rhs.front().first!=1.0);
+}
+
+bool Extender::isExtendingSource() const
+{
+  return rhs.size() and not rhs.front().second.isExtender();
+}
+
+Line* Extender::maybeGetTrivialRhs()
+{
+  if(isCombiner())
+    return nullptr;
+  else
+    return &rhs.front().second;
+}
+
 std::string Extender::describe() const
 {
   std::ostringstream os;
-  os<<::describe(pars)<<" * ";
+  os<<::describe(pars);
   
   if(rhs.size()==0)
     CRASH("cannot describe a line extender which does not extend an existing line");
   else
     {
       if(tSelect!=-1)
-	os<<::describe(DeltaT{(size_t)tSelect})<<" * ";
+	os<<"*"<<::describe(DeltaT{(size_t)tSelect});
+      
+      os<<" * ";
       
       if(rhs.size()>1)
 	os<<"( ";
@@ -548,27 +597,45 @@ std::string describe(const Line& line)
 
 size_t maybeRemoveUselessScalar(Line& line)
 {
-  if(Extender* e=std::get_if<Extender>(&line.data))
-    {
-      int nDeep{};
-      for(auto& [w,l] : e->rhs)
-	nDeep+=maybeRemoveUselessScalar(l);
-      
-      const Gamma* g=
-	std::get_if<Gamma>(&e->pars);
-      
-      size_t n=
-	g!=nullptr and g->iGamma==0 and e->tSelect==-1 and e->rhs.size()==1 and e->rhs.front().first==1.0;
-      
-      if(n)
-	line=e->rhs.front().second;
-      
-      return n+nDeep;
-    }
-  else
-    return 0;
-}
+  // Check if is an extender
+  Extender* e=
+    std::get_if<Extender>(&line.data);
   
+  // Nested remove
+  int nDeep{};
+  if(e)
+    for(auto& [w,l] : e->rhs)
+    nDeep+=maybeRemoveUselessScalar(l);
+  
+  // maybe remove this if 1) is scalar 2) is trivially nesting 3) extends an extender 4) has no time selection
+  
+  Line* nestedRhs=
+    e?e->maybeGetTrivialRhs():nullptr;
+  
+  if(e and nestedRhs)
+    {
+      if(e->isScalar() and e->tSelect==-1)
+	{
+	  line=*nestedRhs;
+	  
+	  return nDeep+1;
+	}
+      
+      Extender* nestedE=
+	std::get_if<Extender>(&nestedRhs->data);
+      
+      if(nestedE->isScalar() and e->tSelect==-1)
+	{
+	  e->tSelect=nestedE->tSelect;
+	  e->rhs=std::move(nestedE->rhs);
+	  
+	  return nDeep+1;
+	}
+    }
+  
+  return nDeep;
+}
+
 // void compile(UnorderedInstructions& out,
 // 	     std::vector<Source>& sources,
 // 	     const Line& line)
@@ -696,7 +763,7 @@ int main()
   // cout<<endl;
   
   Source eta{};
-  Line a=op1.dag()*eta;
+  Line a=op1*eta;
   // Line b=op2*eta;
 
   const Oper* o=&op1;
@@ -707,9 +774,11 @@ int main()
     }
   
   
-  
+  cout<<"Bef"<<endl;
   cout<<describe(a)<<endl;
-  
+  maybeRemoveUselessScalar(a);
+  cout<<"Aft"<<endl;
+  cout<<describe(a)<<endl;
   
   // b.dag()*a;
   // std::vector<Oper> operations;
