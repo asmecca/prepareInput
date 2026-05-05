@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <map>
 #include <memory>
-#include <numeric>
+#include <set>
 #include <sstream>
 #include <iostream>
 #include <execinfo.h>
@@ -143,7 +143,7 @@ struct Smear
     return (std::ostringstream()<<"smear(kappa="<<kappa<<",n="<<n<<",mom="<<mom<<")").str();
   }
   
-  bool operator<=>(const Smear&) const=default;
+  constexpr std::partial_ordering operator<=>(const Smear&) const=default;
 };
 
 struct Phase
@@ -164,7 +164,7 @@ struct Phase
     return res;
   }
   
-  bool operator<=>(const Phase&) const=default;
+  constexpr std::partial_ordering operator<=>(const Phase&) const=default;
 };
 
 struct Gamma
@@ -181,7 +181,7 @@ struct Gamma
     return *this;
   }
   
-  bool operator<=>(const Gamma&) const=default;
+  constexpr std::partial_ordering operator<=>(const Gamma&) const=default;
 };
 
 struct DeltaT
@@ -198,7 +198,7 @@ struct DeltaT
     return *this;
   }
   
-  bool operator<=>(const DeltaT&) const=default;
+  constexpr std::partial_ordering operator<=>(const DeltaT&) const=default;
 };
 
 struct Prop
@@ -231,7 +231,7 @@ struct Prop
     return *this;
   }
   
-  bool operator<=>(const Prop&) const=default;
+  constexpr std::partial_ordering operator<=>(const Prop&) const=default;
 };
 
 /////////////////////////////////////////////////////////////////
@@ -262,33 +262,6 @@ Oper operator*(const Oper& a,
 
 using Command=
   std::tuple<size_t,Pars,int,size_t>;
-
-struct UnorderedInstructions
-{
-  std::vector<Command> instructions;
-  
-  void tryEmplace(const size_t& lhs,
-		  const Pars& pars,
-		  const int& t,
-		  const size_t& sources)
-  {
-    const auto it=
-      std::find_if(instructions.begin(),
-		   instructions.end(),
-		   [&lhs](const Command& command)
-		   {
-		     return std::get<0>(command)==lhs;
-		   });
-    
-    if(it!=instructions.end())
-      if(std::get<1>(*it)!=pars or std::get<2>(*it)!=t or std::get<3>(*it)!=sources)
-	CRASH("lhs %zu already present, watchout for collision!",lhs);
-      else
-	return;
-    else
-      instructions.emplace_back(lhs,pars,t,sources);
-  }
-};
 
 struct Executable
 {
@@ -348,13 +321,15 @@ struct Oper
   }
   
   Oper(const Oper& oth) :
-    pars{oth.pars},rhs{oth.rhs?std::make_unique<Oper>(*oth.rhs):nullptr}
+    pars{oth.pars},
+    rhs{oth.rhs?std::make_unique<Oper>(*oth.rhs):nullptr}
   {
   }
   
   Oper(const Pars& pars,
        const Oper& rhs) :
-    pars{pars},rhs(std::make_unique<Oper>(rhs))
+    pars{pars},
+    rhs(std::make_unique<Oper>(rhs))
   {
   }
   
@@ -379,6 +354,30 @@ struct Oper
   // {
   //   return std::hash<std::string>{}(describe());
   // }
+  
+  constexpr bool operator==(const Oper& other) const
+  {
+    return pars==other.pars and
+      (((not rhs) and (not other.rhs))
+       or (rhs and other.rhs and rhs==other.rhs));
+  }
+  
+  constexpr std::partial_ordering operator<=>(const Oper& other) const
+  {
+    if(auto cmp=pars<=>other.pars;cmp!=0)
+      return cmp;
+    
+    if ((not rhs) and (not other.rhs))
+      return std::partial_ordering::equivalent;
+    
+    if(not rhs)
+      return std::partial_ordering::less;
+    
+    if(not other.rhs)
+      return std::partial_ordering::greater;
+    
+    return *rhs<=>*other.rhs;
+  }
 };
 
 Oper operator*(const Oper& a,
@@ -410,7 +409,10 @@ struct Source
   {
     count=glbCount++;
   }
+  
+  constexpr std::partial_ordering operator<=>(const Source&) const=default;
 };
+
 
 struct Line;
 
@@ -438,6 +440,9 @@ struct Extender
   Line* maybeGetTrivialRhs();
   
   Extender* maybeGetNestedExtender();
+  
+  constexpr bool operator==(const Extender&) const;
+  constexpr std::partial_ordering operator<=>(const Extender&) const;
 };
 
 struct Line
@@ -477,12 +482,20 @@ struct Line
 	    }},data);
   }
   
+  void trySimplify()
+  {
+    maybeRemoveDeltaT();
+    maybeRemoveUselessScalar();
+  }
+  
+  size_t maybeRemoveUselessScalar();
+  
   Line(const Pars& pars,
        const std::vector<std::pair<double,Line>>& rhs,
        const int tSelect=-1) :
     data{Extender{pars,rhs,tSelect}}
   {
-    maybeRemoveDeltaT();
+    trySimplify();
   }
   
   Line(const Oper& oper,
@@ -496,8 +509,10 @@ struct Line
     else
       e.rhs.emplace_back(1.0,line);
     
-    maybeRemoveDeltaT();
+    trySimplify();
   }
+  
+  constexpr std::partial_ordering operator<=>(const Line&) const=default;
   
   Line(const Line&)=default;
   
@@ -506,6 +521,7 @@ struct Line
   Line(const T& data) :
     data{data}
   {
+    trySimplify();
   }
   
   std::string describe() const
@@ -518,18 +534,17 @@ struct Line
   }
 };
 
-bool Extender::isScalar() const
-{
-  const Gamma* g=
-    std::get_if<Gamma>(&pars);
-  
-  return
-    g!=nullptr and g->iGamma==0;
-}
+constexpr bool Extender::operator==(const Extender&) const=default;
 
-bool Extender::isCombiner() const
+constexpr std::partial_ordering Extender::operator<=>(const Extender& other) const
 {
-  return rhs.size()>1 or (rhs.size()==1 and rhs.front().first!=1.0);
+  if(auto cmp=pars<=>other.pars;cmp!=0)
+    return cmp;
+  
+  if(auto cmp=rhs<=>other.rhs;cmp!=0)
+    return cmp;
+  
+  return tSelect<=>other.tSelect;
 }
 
 bool Extender::isExtendingSource() const
@@ -557,10 +572,10 @@ std::string Extender::describe() const
       if(tSelect!=-1)
 	os<<"*"<<::describe(DeltaT{(size_t)tSelect});
       
-      os<<" * ";
+      os<<"*";
       
       if(rhs.size()>1)
-	os<<"( ";
+	os<<"(";
       
       for(size_t c{};const auto& [w,line] : rhs)
 	{
@@ -581,7 +596,7 @@ std::string Extender::describe() const
 	}
       
       if(rhs.size()>1)
-	os<<" )";
+	os<<")";
     }
   
   return os.str();
@@ -595,17 +610,17 @@ std::string describe(const Line& line)
   },line.data);
 }
 
-size_t maybeRemoveUselessScalar(Line& line)
+size_t Line::maybeRemoveUselessScalar()
 {
   // Check if is an extender
   Extender* e=
-    std::get_if<Extender>(&line.data);
+    std::get_if<Extender>(&this->data);
   
   // Nested remove
   int nDeep{};
   if(e)
     for(auto& [w,l] : e->rhs)
-    nDeep+=maybeRemoveUselessScalar(l);
+    nDeep+=l.maybeRemoveUselessScalar();
   
   // maybe remove this if 1) is scalar 2) is trivially nesting 3) extends an extender 4) has no time selection
   
@@ -616,7 +631,7 @@ size_t maybeRemoveUselessScalar(Line& line)
     {
       if(e->isScalar() and e->tSelect==-1)
 	{
-	  line=*nestedRhs;
+	  *this=*nestedRhs;
 	  
 	  return nDeep+1;
 	}
@@ -636,30 +651,6 @@ size_t maybeRemoveUselessScalar(Line& line)
   return nDeep;
 }
 
-// void compile(UnorderedInstructions& out,
-// 	     std::vector<Source>& sources,
-// 	     const Line& line)
-// {
-//   std::visit(Overload{[&sources](const Source& source)
-//   {
-//     sources.push_back(source);
-//   },
-// 	[](const Extender& lineExtender)
-// 	{
-// 	  if(lineExtender.rhs.size())
-// 	    {
-// 	      const size_t lhsHash=
-// 		std::hash<std::string>{}(describe(linpars));
-	
-// 	rhs->compile(out);
-// 	const size_t rhsHash=this->rhs->hash();
-	
-// 	out.tryEmplace(lhsHash,pars,rhsHash);
-//       }
-// 	}
-// 	},line);
-//   }
-  
 Line operator*(const Oper& oper,
 	       const Line& line)
 {
@@ -705,6 +696,60 @@ Line operator+(const Line& a,
     return Extender(Gamma{0},std::vector{std::make_pair(1.0,a),{1.0,b}});
 }
 
+struct Contracter
+{
+  std::string name;
+  
+  std::set<std::pair<int,int>> gammaList;
+  
+  std::set<std::pair<Line,Line>> lines;
+  
+  Contracter(const std::string& name) :
+    name(name)
+  {
+  }
+  
+  void addGammas(const int& sink,
+	   const int& sour)
+  {
+    gammaList.emplace(sink,sour);
+  }
+  
+  void operator()(const Line& bw,
+		  const Line& fw)
+  {
+    lines.emplace(bw,fw);
+  }
+};
+
+struct Compiler
+{
+  std::map<Line,std::set<std::variant<Line,std::pair<Line,Line>>>> dependencies;
+  
+  void insert(const Line& l,
+	      const std::variant<Line,std::pair<Line,Line>>& dep)
+  {
+    dependencies[l].insert(dep);
+    
+    std::visit(Overload{[](const Source& source)
+    {
+    },
+	  [&l,
+	   this](const Extender& extender)
+	  {
+	    for(const auto& [w,li] : extender.rhs)
+	      insert(li,l);
+	  }},l.data);
+  }
+  
+  void compile(const Contracter& contr)
+  {
+    for(const auto& [bw,fw] : contr.lines)
+      for(const Line& l : {bw,fw})
+	insert(l,std::make_pair(bw,fw));
+  }
+};
+
 // void compile(UnorderedInstructions& out,
 // 	     const Line& line)
 // {
@@ -740,7 +785,7 @@ int main()
   
   Prop prop{.kappa=0.133,.mass=0.02,.r=1,.charge=0.0,.residue=0.0011};
   
-  const Oper op1=prop*sme*deltaT;//*phase*sme;
+  const Oper op1=prop*sme*deltaT*phase*sme;
   const Oper op2=phase*sme*sme;
   
   std::vector<Oper> operations{op1,op2};
@@ -763,9 +808,9 @@ int main()
   // cout<<endl;
   
   Source eta{};
-  Line a=op1*eta;
-  // Line b=op2*eta;
-
+  Line a=op2*(op1*eta+eta);
+  Line b=op2*eta;
+  
   const Oper* o=&op1;
   while(o)
     {
@@ -774,20 +819,30 @@ int main()
     }
   
   
-  cout<<"Bef"<<endl;
-  cout<<describe(a)<<endl;
-  maybeRemoveUselessScalar(a);
-  cout<<"Aft"<<endl;
   cout<<describe(a)<<endl;
   
-  // b.dag()*a;
-  // std::vector<Oper> operations;
-  // cout<<"List of operations:"<<endl;
-  // for(const Oper& oper : operations)
-  //   cout<<" "<<oper.describe()<<endl;
-  // cout<<endl;
+  Contracter box("box");
+  box.addGammas(5,5);
+  box(a,b);
   
+  Compiler compiler;
+  compiler.compile(box);
   
+  cout<<endl;
+  for(const auto& [l,deps] : compiler.dependencies)
+    {
+      cout<<describe(l)<<endl;
+      for(const auto& d : deps)
+	cout<<" "<<std::visit(Overload{[](const Line& line)
+	{
+	  return describe(line);
+	},
+	      [](const std::pair<Line,Line>& contr)->std::string
+	      {
+		return "contr";
+	      }},d)<<endl;
+      cout<<endl;
+    }
   
   Executable executable;
   
