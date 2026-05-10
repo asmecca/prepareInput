@@ -8,12 +8,31 @@
 #include <sstream>
 #include <iostream>
 #include <execinfo.h>
+#include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
 using std::cout;
 using std::cerr;
 using std::endl;
+
+size_t hashCombine(const size_t& h,
+		   const size_t& x)
+{
+  return h^(x+0x9e3779b9+(h<<6)+(h>>2));
+}
+
+template <typename T>
+requires requires(T t){
+  t.hash();}
+struct std::hash<T>
+{
+  size_t operator()(const T& t) const
+  {
+    return t.hash();
+  }
+};
 
 /// Overload pattern
 template <typename...Ts>
@@ -81,10 +100,34 @@ void internal_crash(const int& line,
 
 /////////////////////////////////////////////////////////////////
 
+template <typename T,
+	  size_t N>
+struct std::hash<std::array<T,N>>
+{
+  const size_t operator()(const std::array<T,N>& m) const
+  {
+    size_t h{};
+    
+    for(size_t i=0;i<N;i++)
+      h=hashCombine(h,std::hash<T>{}(m[i]));
+    
+    return h;
+  }
+};
+
 /// Holds three components of the momentum
 struct Momentum :
   std::array<double,3>
 {
+};
+
+template <>
+struct std::hash<Momentum>
+{
+  const size_t operator()(const Momentum& m) const
+  {
+    return std::hash<std::array<double,3>>{}((std::array<double,3>&)m);
+  }
 };
 
 std::ostream& operator<<(std::ostream& os,
@@ -125,13 +168,55 @@ struct Oper;
 
 /////////////////////////////////////////////////////////////////
 
-struct Smear
+int registerOp()
+{
+  static int i=0;
+  
+  return i++;
+}
+
+template <typename D>
+struct BasePar
+{
+  inline static int id=
+    registerOp();
+  
+  const D& operator~() const
+  {
+    return *static_cast<const D*>(this);
+  }
+  
+  size_t hash() const
+  {
+    return std::apply([](auto&&...arg)
+    {
+      std::array a{std::hash<std::decay_t<decltype(arg)>>{}(arg)...};
+      
+      size_t h=std::hash<int>{}(id);
+      
+      for(size_t i=0;i<a.size();i++)
+	h=hashCombine(h,a[i]);
+      
+      return h;
+    },(~(*this)).getMembers());
+  }
+  
+  constexpr std::partial_ordering operator<=>(const BasePar&) const=default;
+};
+
+struct Smear :
+  BasePar<Smear>
 {
   double kappa{};
   
   double n{};
   
   Momentum mom{};
+  
+  auto getMembers() const
+  {
+    return std::tie(kappa,n,mom);
+  }
   
   Smear dag() const
   {
@@ -146,9 +231,15 @@ struct Smear
   constexpr std::partial_ordering operator<=>(const Smear&) const=default;
 };
 
-struct Phase
+struct Phase :
+  BasePar<Phase>
 {
   Momentum mom;
+  
+  auto getMembers() const
+  {
+    return std::tie(mom);
+  }
   
   std::string describe() const
   {
@@ -167,9 +258,15 @@ struct Phase
   constexpr std::partial_ordering operator<=>(const Phase&) const=default;
 };
 
-struct Gamma
+struct Gamma :
+  BasePar<Gamma>
 {
   size_t iGamma{};
+  
+  auto getMembers() const
+  {
+    return std::tie(iGamma);
+  }
   
   std::string describe() const
   {
@@ -184,9 +281,15 @@ struct Gamma
   constexpr std::partial_ordering operator<=>(const Gamma&) const=default;
 };
 
-struct DeltaT
+struct DeltaT :
+  BasePar<DeltaT>
 {
   size_t t;
+  
+  auto getMembers() const
+  {
+    return std::tie(t);
+  }
   
   std::string describe() const
   {
@@ -201,7 +304,8 @@ struct DeltaT
   constexpr std::partial_ordering operator<=>(const DeltaT&) const=default;
 };
 
-struct Prop
+struct Prop :
+  BasePar<Prop>
 {
   double kappa{};
   
@@ -214,6 +318,11 @@ struct Prop
   Momentum mom{};
   
   double residue{};
+  
+  auto getMembers() const
+  {
+    return std::tie(kappa,mass,r,charge,mom,residue);
+  }
   
   std::string describe() const
   {
@@ -255,6 +364,15 @@ std::string describe(const Pars& pars)
       {
 	return o.describe();
       },pars);
+}
+
+template <typename...T>
+std::string describe(const std::variant<T...>& t)
+{
+  return std::visit([](const auto& t)
+  {
+    return describe(t);
+  },t);
 }
 
 Oper operator*(const Oper& a,
@@ -468,7 +586,7 @@ struct Line
 	if(n)
 	  {
 	    extender.tSelect=dt->t;
-	    extender.pars=Gamma{0};
+	    extender.pars=Gamma{.iGamma=0};
 	  }
 	
 	for(auto& [w,l] : extender.rhs)
@@ -570,7 +688,7 @@ std::string Extender::describe() const
   else
     {
       if(tSelect!=-1)
-	os<<"*"<<::describe(DeltaT{(size_t)tSelect});
+	os<<"*"<<::describe(DeltaT{.t=(size_t)tSelect});
       
       os<<"*";
       
@@ -602,12 +720,12 @@ std::string Extender::describe() const
   return os.str();
 }
 
-std::string describe(const Line& line)
+template <typename T>
+requires requires(T t){
+  t.describe();}
+std::string describe(const T& t)
 {
-  return std::visit([](const auto& v)
-  {
-    return v.describe();
-  },line.data);
+  return t.describe();
 }
 
 size_t Line::maybeRemoveUselessScalar()
@@ -693,62 +811,286 @@ Line operator+(const Line& a,
       return res;
     }
   else
-    return Extender(Gamma{0},std::vector{std::make_pair(1.0,a),{1.0,b}});
+    return Extender(Gamma{.iGamma=0},std::vector{std::make_pair(1.0,a),{1.0,b}});
 }
 
-struct Contracter
+struct Contr
 {
   std::string name;
   
   std::set<std::pair<int,int>> gammaList;
   
-  std::set<std::pair<Line,Line>> lines;
+  std::partial_ordering operator<=>(const Contr&) const=default;
   
-  Contracter(const std::string& name) :
-    name(name)
+  std::string describe() const
   {
-  }
-  
-  void addGammas(const int& sink,
-	   const int& sour)
-  {
-    gammaList.emplace(sink,sour);
-  }
-  
-  void operator()(const Line& bw,
-		  const Line& fw)
-  {
-    lines.emplace(bw,fw);
+    std::ostringstream os;
+    
+    os<<"contr("<<name<<",{";
+    for(const auto& [i,j] : gammaList)
+      os<<i<<"-"<<j<<" ";
+    os<<"})";
+    
+    return os.str();
   }
 };
 
-struct Compiler
+
+struct Node
 {
-  std::map<Line,std::set<std::variant<Line,std::pair<Line,Line>>>> dependencies;
-  
-  void insert(const Line& l,
-	      const std::variant<Line,std::pair<Line,Line>>& dep)
+  struct Shape
   {
-    dependencies[l].insert(dep);
+    using Op=
+      std::variant<Pars,Contr,Source>;
     
-    std::visit(Overload{[](const Source& source)
+    Op op;
+    
+    std::vector<Node*> deps;
+    
+    constexpr std::partial_ordering operator<=>(const Shape&) const=default;
+    
+    std::string describe() const
     {
-    },
-	  [&l,
-	   this](const Extender& extender)
-	  {
-	    for(const auto& [w,li] : extender.rhs)
-	      insert(li,l);
-	  }},l.data);
+      std::ostringstream os;
+      
+      os<<">>> "<<::describe(op)<<" on (";
+      for(const Node* n : deps)
+	os<<::describe(*n)<<" ";
+      os<<")";
+      
+      return os.str();
+    }
+  };
+  
+  Shape shape;
+  
+  std::vector<Node*> users;
+  
+  std::string describe() const
+  {
+    return shape.describe();
   }
   
-  void compile(const Contracter& contr)
-  {
-    for(const auto& [bw,fw] : contr.lines)
-      for(const Line& l : {bw,fw})
-	insert(l,std::make_pair(bw,fw));
-  }
+  int id;
+  
+  int remainingUses;
+  
+  int weight;
 };
+
+// template <>
+// struct std::hash<Node::Shape>
+// {
+//   size_t operator()(const Node::Shape& ns) const
+//   {
+//     size_t h=
+//       std::hash<Node::Shape::Op>{}(ns.op);
+    
+//     for(const Node* dep : deps)
+//       h=hashCombine(h,std::hash<Node*>{}(dep));
+    
+//   }
+// }
+
+// struct Contracter
+// {
+//   Contr pars;
+  
+//   std::set<std::pair<Line,Line>> traces;
+  
+//   Contracter(const std::string& name) :
+//     pars{.name=name}
+//   {
+//   }
+  
+//   void addGammas(const int& sink,
+// 		 const int& sour)
+//   {
+//     pars.gammaList.emplace(sink,sour);
+//   }
+  
+//   void operator()(const Line& bw,
+// 		  const Line& fw)
+//   {
+//     traces.emplace(bw,fw);
+//   }
+  
+//   void compile()
+//   {
+//     std::unordered_set<Node,decltype([](const Node&){return 1;})> myNodes;
+    
+//     std::vector<std::unique_ptr<Node>> nodes;
+    
+//     std::map<NodeKey,Node*> table;
+    
+//     std::set<Line> lines;
+    
+//     for(const auto& [a,b] : traces)
+//       for(const Line& l : {a,b})
+// 	lines.insert(l);
+    
+//     auto insertNode=
+//       [&table,
+//        &nodes](auto&& insertNode,
+// 	       const Line& line)->Node*
+//       {
+// 	NodeKey key;
+	
+// 	std::visit(Overload{[&key,
+// 			     &insertNode](const Extender& e)
+// 	{
+// 	  key.op=e.pars;
+// 	  for(const auto& [w,l] : e.rhs)
+// 	    key.deps.push_back(insertNode(insertNode,l));
+// 	},
+// 	      [&key](const Source& s)
+// 	      {
+// 		key.op=s;
+// 	      }},line.data);
+	
+// 	auto it=table.find(key);
+// 	Node* res;
+// 	if(it==table.end())
+// 	  {
+// 	    std::unique_ptr<Node> n=std::make_unique<Node>();
+// 	    n->op=key.op;
+// 	    n->deps=key.deps;
+// 	    res=&*n;
+	    
+// 	    table[key]=res;
+	    
+// 	    //cout<<"creating node "<<describe(*n)<<endl;
+	    
+// 	    nodes.push_back(std::move(n));
+// 	  }
+// 	else
+// 	  res=it->second;
+	
+// 	return res;
+//       };
+    
+//     for(const Line& line : lines)
+//       insertNode(insertNode,line);
+
+//     // Add users
+//     for(std::unique_ptr<Node>& n : nodes)
+//       for(Node* const d : n->deps)
+// 	d->users.push_back(&*n);
+	
+//     // report
+//     cout<<"==========="<<endl;
+//     for(const auto& [k,n] : table)
+//       {
+// 	cout<<describe(*n)<<endl;
+// 	cout<<" users:"<<endl;
+// 	for(const Node* u : n->users)
+// 	  cout<<"  "<<describe(*u)<<endl;
+//       }
+//   }
+// };
+
+/* now, vreates a new representation with nodes which seerves to
+   represent 3 kind of operation: creating a source, extending a line,
+   or contracting, creating all nodes in an arena implement the
+   topology and so on*/
+
+bool Extender::isCombiner() const
+{
+  return rhs.size()>1 or (rhs.size()==1 and rhs.front().first!=1.0);
+}
+
+bool Extender::isScalar() const
+{
+  const Gamma* g=
+    std::get_if<Gamma>(&pars);
+  
+  return
+    g!=nullptr and g->iGamma==0;
+} 
+
+
+//   struct Extender
+// {
+//   Pars pars;
+  
+//   std::vector<double> rhs;
+  
+//   int tSelect{-1};
+  
+//   std::string describe() const;
+  
+//   bool isScalar() const
+//   {
+//     const Gamma* g=
+//       std::get_if<Gamma>(&pars);
+    
+//     return
+//       g!=nullptr and g->iGamma==0;
+//   }
+  
+//   bool isCombiner() const
+//   {
+//     return rhs.size()>1 or (rhs.size()==1 and rhs.front()!=1.0);
+//   }
+  
+//   bool isSelectingTime() const
+//   {
+//     return tSelect!=-1;
+//   }
+// };
+
+// struct Contraction
+// {
+//   std::string name;
+  
+//   std::set<std::pair<int,int>> gammaList;
+// };
+
+// using ActualOp=
+//   std::variant<Source,Extender,Contraction>;
+
+// struct Node
+// {
+//   ActualOp op;
+  
+//   std::vector<Node*> deps;
+  
+//   std::vector<Node*> users;
+  
+//   int id;
+  
+//   int remainingUses;
+  
+//   int weight;
+// };
+
+// struct Compiler
+// {
+//   std::map<Line,std::set<std::variant<Line,std::pair<Line,Line>>>> dependencies;
+  
+//   void insert(const Line& l,
+// 	      const std::variant<Line,std::pair<Line,Line>>& dep)
+//   {
+//     dependencies[l].insert(dep);
+    
+//     std::visit(Overload{[](const Source& source)
+//     {
+//     },
+// 	  [&l,
+// 	   this](const Extender& extender)
+// 	  {
+// 	    for(const auto& [w,li] : extender.rhs)
+// 	      insert(li,l);
+// 	  }},l.data);
+//   }
+  
+//   void compile(const Contracter& contr)
+//   {
+//     for(const auto& [bw,fw] : contr.traces)
+//       for(const Line& l : {bw,fw})
+// 	insert(l,std::make_pair(bw,fw));
+//   }
+// };
 
 // void compile(UnorderedInstructions& out,
 // 	     const Line& line)
@@ -821,30 +1163,40 @@ int main()
   
   cout<<describe(a)<<endl;
   
-  Contracter box("box");
-  box.addGammas(5,5);
-  box(a,b);
+  cout<<Smear::id<<" "<<Phase::id<<endl;
   
-  Compiler compiler;
-  compiler.compile(box);
   
-  cout<<endl;
-  for(const auto& [l,deps] : compiler.dependencies)
-    {
-      cout<<describe(l)<<endl;
-      for(const auto& d : deps)
-	cout<<" "<<std::visit(Overload{[](const Line& line)
-	{
-	  return describe(line);
-	},
-	      [](const std::pair<Line,Line>& contr)->std::string
-	      {
-		return "contr";
-	      }},d)<<endl;
-      cout<<endl;
-    }
+  Smear sme1{.kappa=0.1};
+  Pars s{sme1};
+  cout<<sme1.hash()<<endl;
+  cout<<std::hash<Pars>{}(s)<<endl;
   
-  Executable executable;
+  // Contracter box("box");
+  // box.addGammas(5,5);
+  // box(a,b);
+  
+  // box.compile();
+  
+  // Compiler compiler;
+  // compiler.compile(box);
+  
+  // cout<<endl;
+  // for(const auto& [l,deps] : compiler.dependencies)
+  //   {
+  //     cout<<describe(l)<<endl;
+  //     for(const auto& d : deps)
+  // 	cout<<" "<<std::visit(Overload{[](const Line& line)
+  // 	{
+  // 	  return describe(line);
+  // 	},
+  // 	      [](const std::pair<Line,Line>& contr)->std::string
+  // 	      {
+  // 		return "contr";
+  // 	      }},d)<<endl;
+  //     cout<<endl;
+  //   }
+  
+  // Executable executable;
   
   // std::map<size_t,size_t> dependenciesMultiplicity;
   // for(const auto& [lhs,pars,sources] : unorderedInstructions.instructions)
