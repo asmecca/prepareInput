@@ -34,6 +34,63 @@ struct std::hash<T>
   }
 };
 
+template <typename...T>
+size_t hashTuple(const std::tuple<T...>& t)
+{
+  return std::apply([](auto&&...arg)
+  {
+    std::array a{std::hash<std::decay_t<decltype(arg)>>{}(arg)...};
+    
+    size_t h{};
+    
+    for(size_t i=0;i<a.size();i++)
+      h=hashCombine(h,a[i]);
+    
+    return h;
+  },t);
+}
+
+template <typename A,
+	  typename B>
+struct std::hash<std::pair<A,B>>
+{
+  size_t operator()(const std::pair<A,B>& c) const
+  {
+    return hashTuple(std::tie(c.first,c.second));
+  }
+};
+
+template <typename T>
+requires requires(T t){
+  t.begin();
+  t.end();}
+struct std::hash<T>
+{
+  size_t operator()(const T& s) const
+  {
+    size_t h{};
+    
+    for(const auto& t: s)
+      h=hashCombine(h,std::hash<std::decay_t<decltype(t)>>{}(t));
+    
+    return h;
+  }
+};
+
+template <typename T>
+struct std::hash<std::vector<T>>
+{
+  size_t operator()(const std::vector<T>& s) const
+  {
+    size_t h{};
+    
+    for(const T& t: s)
+      h=hashCombine(h,std::hash<T>{}(t));
+    
+    return h;
+  }
+};
+
 /// Overload pattern
 template <typename...Ts>
 struct Overload :
@@ -188,17 +245,8 @@ struct BasePar
   
   size_t hash() const
   {
-    return std::apply([](auto&&...arg)
-    {
-      std::array a{std::hash<std::decay_t<decltype(arg)>>{}(arg)...};
-      
-      size_t h=std::hash<int>{}(id);
-      
-      for(size_t i=0;i<a.size();i++)
-	h=hashCombine(h,a[i]);
-      
-      return h;
-    },(~(*this)).getMembers());
+    return hashCombine(std::hash<int>{}(id),
+		       hashTuple((~(*this)).getMembers()));
   }
   
   constexpr std::partial_ordering operator<=>(const BasePar&) const=default;
@@ -518,6 +566,11 @@ struct Source
   
   size_t count;
   
+  size_t hash() const
+  {
+    return hashTuple(std::tie(count));
+  }
+  
   std::string describe() const
   {
     return (std::ostringstream()<<"source(count="<<count<<")").str();
@@ -820,6 +873,11 @@ struct Contr
   
   std::set<std::pair<int,int>> gammaList;
   
+  size_t hash() const
+  {
+    return hashTuple(std::tie(name,gammaList));
+  }
+  
   std::partial_ordering operator<=>(const Contr&) const=default;
   
   std::string describe() const
@@ -835,7 +893,6 @@ struct Contr
   }
 };
 
-
 struct Node
 {
   struct Shape
@@ -846,6 +903,11 @@ struct Node
     Op op;
     
     std::vector<Node*> deps;
+    
+    size_t hash() const
+    {
+      return hashTuple(std::tie(op,deps));
+    }
     
     constexpr std::partial_ordering operator<=>(const Shape&) const=default;
     
@@ -878,118 +940,88 @@ struct Node
   int weight;
 };
 
-// template <>
-// struct std::hash<Node::Shape>
-// {
-//   size_t operator()(const Node::Shape& ns) const
-//   {
-//     size_t h=
-//       std::hash<Node::Shape::Op>{}(ns.op);
+struct Contracter
+{
+  Contr pars;
+  
+  std::set<std::pair<Line,Line>> traces;
+  
+  Contracter(const std::string& name) :
+    pars{.name=name}
+  {
+  }
+  
+  void addGammas(const int& sink,
+		 const int& sour)
+  {
+    pars.gammaList.emplace(sink,sour);
+  }
+  
+  void operator()(const Line& bw,
+		  const Line& fw)
+  {
+    traces.emplace(bw,fw);
+  }
+  
+  void compile()
+  {
+    std::set<Line> lines;
     
-//     for(const Node* dep : deps)
-//       h=hashCombine(h,std::hash<Node*>{}(dep));
+    for(const auto& [a,b] : traces)
+      for(const Line& l : {a,b})
+	lines.insert(l);
     
-//   }
-// }
+    std::unordered_set<std::unique_ptr<Node>,
+		       decltype([](const std::unique_ptr<Node>& node){return node->shape.hash();}),
+		       decltype([](const std::unique_ptr<Node>& a,
+				   const std::unique_ptr<Node>& b)
+		       {
+			 return a->shape==b->shape;
+		       })> nodes;
+    
+    auto insertNode=
+      [&nodes](auto&& insertNode,
+	       const Line& line)->Node*
+      {
+	std::unique_ptr<Node> testNode=std::make_unique<Node>();
+	
+	std::visit(Overload{[&testNode,
+			     &insertNode](const Extender& e)
+	{
+	  testNode->shape.op=e.pars;
+	  
+	  for(const auto& [w,l] : e.rhs)
+	    testNode->shape.deps.push_back(insertNode(insertNode,l));
+	},
+	      [&testNode](const Source& s)
+	      {
+		testNode->shape.op=s;
+	      }},line.data);
+	
+	return &**nodes.insert(std::move(testNode)).first;
+      };
+    
+    for(const Line& line : lines)
+      insertNode(insertNode,line);
+    
+    // Add users
+    for(auto& n : nodes)
+      for(Node* d : n->shape.deps)
+	d->users.push_back(&*n);
+    
+    // report
+    cout<<"==========="<<endl;
+    for(const auto& n : nodes)
+      {
+	cout<<describe(*n)<<endl;
+	cout<<" users:"<<endl;
+	for(const Node* u : n->users)
+	  cout<<"  "<<describe(*u)<<endl;
+      }
+  }
+};
 
-// struct Contracter
-// {
-//   Contr pars;
-  
-//   std::set<std::pair<Line,Line>> traces;
-  
-//   Contracter(const std::string& name) :
-//     pars{.name=name}
-//   {
-//   }
-  
-//   void addGammas(const int& sink,
-// 		 const int& sour)
-//   {
-//     pars.gammaList.emplace(sink,sour);
-//   }
-  
-//   void operator()(const Line& bw,
-// 		  const Line& fw)
-//   {
-//     traces.emplace(bw,fw);
-//   }
-  
-//   void compile()
-//   {
-//     std::unordered_set<Node,decltype([](const Node&){return 1;})> myNodes;
-    
-//     std::vector<std::unique_ptr<Node>> nodes;
-    
-//     std::map<NodeKey,Node*> table;
-    
-//     std::set<Line> lines;
-    
-//     for(const auto& [a,b] : traces)
-//       for(const Line& l : {a,b})
-// 	lines.insert(l);
-    
-//     auto insertNode=
-//       [&table,
-//        &nodes](auto&& insertNode,
-// 	       const Line& line)->Node*
-//       {
-// 	NodeKey key;
-	
-// 	std::visit(Overload{[&key,
-// 			     &insertNode](const Extender& e)
-// 	{
-// 	  key.op=e.pars;
-// 	  for(const auto& [w,l] : e.rhs)
-// 	    key.deps.push_back(insertNode(insertNode,l));
-// 	},
-// 	      [&key](const Source& s)
-// 	      {
-// 		key.op=s;
-// 	      }},line.data);
-	
-// 	auto it=table.find(key);
-// 	Node* res;
-// 	if(it==table.end())
-// 	  {
-// 	    std::unique_ptr<Node> n=std::make_unique<Node>();
-// 	    n->op=key.op;
-// 	    n->deps=key.deps;
-// 	    res=&*n;
-	    
-// 	    table[key]=res;
-	    
-// 	    //cout<<"creating node "<<describe(*n)<<endl;
-	    
-// 	    nodes.push_back(std::move(n));
-// 	  }
-// 	else
-// 	  res=it->second;
-	
-// 	return res;
-//       };
-    
-//     for(const Line& line : lines)
-//       insertNode(insertNode,line);
-
-//     // Add users
-//     for(std::unique_ptr<Node>& n : nodes)
-//       for(Node* const d : n->deps)
-// 	d->users.push_back(&*n);
-	
-//     // report
-//     cout<<"==========="<<endl;
-//     for(const auto& [k,n] : table)
-//       {
-// 	cout<<describe(*n)<<endl;
-// 	cout<<" users:"<<endl;
-// 	for(const Node* u : n->users)
-// 	  cout<<"  "<<describe(*u)<<endl;
-//       }
-//   }
-// };
-
-/* now, vreates a new representation with nodes which seerves to
+/* now, creates a new representation with nodes which seerves to
    represent 3 kind of operation: creating a source, extending a line,
    or contracting, creating all nodes in an arena implement the
    topology and so on*/
@@ -1006,114 +1038,7 @@ bool Extender::isScalar() const
   
   return
     g!=nullptr and g->iGamma==0;
-} 
-
-
-//   struct Extender
-// {
-//   Pars pars;
-  
-//   std::vector<double> rhs;
-  
-//   int tSelect{-1};
-  
-//   std::string describe() const;
-  
-//   bool isScalar() const
-//   {
-//     const Gamma* g=
-//       std::get_if<Gamma>(&pars);
-    
-//     return
-//       g!=nullptr and g->iGamma==0;
-//   }
-  
-//   bool isCombiner() const
-//   {
-//     return rhs.size()>1 or (rhs.size()==1 and rhs.front()!=1.0);
-//   }
-  
-//   bool isSelectingTime() const
-//   {
-//     return tSelect!=-1;
-//   }
-// };
-
-// struct Contraction
-// {
-//   std::string name;
-  
-//   std::set<std::pair<int,int>> gammaList;
-// };
-
-// using ActualOp=
-//   std::variant<Source,Extender,Contraction>;
-
-// struct Node
-// {
-//   ActualOp op;
-  
-//   std::vector<Node*> deps;
-  
-//   std::vector<Node*> users;
-  
-//   int id;
-  
-//   int remainingUses;
-  
-//   int weight;
-// };
-
-// struct Compiler
-// {
-//   std::map<Line,std::set<std::variant<Line,std::pair<Line,Line>>>> dependencies;
-  
-//   void insert(const Line& l,
-// 	      const std::variant<Line,std::pair<Line,Line>>& dep)
-//   {
-//     dependencies[l].insert(dep);
-    
-//     std::visit(Overload{[](const Source& source)
-//     {
-//     },
-// 	  [&l,
-// 	   this](const Extender& extender)
-// 	  {
-// 	    for(const auto& [w,li] : extender.rhs)
-// 	      insert(li,l);
-// 	  }},l.data);
-//   }
-  
-//   void compile(const Contracter& contr)
-//   {
-//     for(const auto& [bw,fw] : contr.traces)
-//       for(const Line& l : {bw,fw})
-// 	insert(l,std::make_pair(bw,fw));
-//   }
-// };
-
-// void compile(UnorderedInstructions& out,
-// 	     const Line& line)
-// {
-  
-//   for(const Oper& oper : operations)
-//     oper.compile(res);
-  
-//   return res;
-// }
-
-// struct Executable
-// {
-//   std::map<std::pair<size_t,size_t>,std::pair<size_t,size_t>> contractions;
-  
-//   void contract(const Line& a,
-// 		const size_t& gSi,
-// 		const Line& b,
-// 		const size_t& gSo)
-//   {
-    
-//   }
-// };
+}
 
 /////////////////////////////////////////////////////////////////
 
@@ -1163,19 +1088,17 @@ int main()
   
   cout<<describe(a)<<endl;
   
-  cout<<Smear::id<<" "<<Phase::id<<endl;
-  
   
   Smear sme1{.kappa=0.1};
   Pars s{sme1};
   cout<<sme1.hash()<<endl;
   cout<<std::hash<Pars>{}(s)<<endl;
   
-  // Contracter box("box");
-  // box.addGammas(5,5);
-  // box(a,b);
+  Contracter box("box");
+  box.addGammas(5,5);
+  box(a,b);
   
-  // box.compile();
+  box.compile();
   
   // Compiler compiler;
   // compiler.compile(box);
