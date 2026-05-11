@@ -8,7 +8,6 @@
 #include <sstream>
 #include <iostream>
 #include <execinfo.h>
-#include <unordered_map>
 #include <unordered_set>
 #include <variant>
 #include <vector>
@@ -895,32 +894,73 @@ struct Contr
 
 struct Node
 {
-  struct Shape
+  template <typename T>
+  struct Hashability
+  {
+    size_t hash() const
+    {
+      const T& t=*static_cast<const T*>(this);
+      
+      return hashTuple(std::tie(t.op,t.deps));
+    }
+    
+    constexpr std::partial_ordering operator<=>(const Hashability&) const=default;
+  };
+  
+  struct Shape :
+    Hashability<Shape>
   {
     using Op=
       std::variant<Pars,Contr,Source>;
     
     Op op;
     
-    std::vector<Node*> deps;
+    std::map<Node*,double> deps;
     
-    size_t hash() const
-    {
-      return hashTuple(std::tie(op,deps));
-    }
-    
-    constexpr std::partial_ordering operator<=>(const Shape&) const=default;
+    std::partial_ordering operator<=>(const Shape&) const=default;
     
     std::string describe() const
     {
       std::ostringstream os;
       
       os<<">>> "<<::describe(op)<<" on (";
-      for(const Node* n : deps)
-	os<<::describe(*n)<<" ";
+      for(const auto& [n,w] : deps)
+	os<<w<<" * "<<::describe(*n)<<" ";
       os<<")";
       
       return os.str();
+    }
+  };
+  
+  struct Hasher
+  {
+    using is_transparent=void;
+    
+    bool operator()(const std::unique_ptr<Node>& node) const
+    {
+      return node->shape.hash();
+    }
+    
+    bool operator()(const Node::Shape& key) const
+    {
+      return key.hash();
+    }
+  };
+  
+  struct Comparer
+  {
+    using is_transparent=void;
+    
+    bool operator()(const std::unique_ptr<Node>& a,
+		    const std::unique_ptr<Node>& b) const
+    {
+      return a->shape==b->shape;
+    }
+    
+    bool operator()(const Node::Shape& a,
+		    const std::unique_ptr<Node>& b) const
+    {
+      return a==b->shape;
     }
   };
   
@@ -936,6 +976,8 @@ struct Node
   int id;
   
   int remainingUses;
+  
+  int remainingDeps;
   
   int weight;
 };
@@ -972,41 +1014,44 @@ struct Contracter
 	lines.insert(l);
     
     std::unordered_set<std::unique_ptr<Node>,
-		       decltype([](const std::unique_ptr<Node>& node){return node->shape.hash();}),
-		       decltype([](const std::unique_ptr<Node>& a,
-				   const std::unique_ptr<Node>& b)
-		       {
-			 return a->shape==b->shape;
-		       })> nodes;
+		       Node::Hasher,
+		       Node::Comparer> nodes;
     
     auto insertNode=
       [&nodes](auto&& insertNode,
 	       const Line& line)->Node*
       {
-	std::unique_ptr<Node> testNode=std::make_unique<Node>();
+	Node::Shape shape;
 	
-	std::visit(Overload{[&testNode,
+	std::visit(Overload{[&shape,
 			     &insertNode](const Extender& e)
 	{
-	  testNode->shape.op=e.pars;
+	  shape.op=e.pars;
 	  
 	  for(const auto& [w,l] : e.rhs)
-	    testNode->shape.deps.push_back(insertNode(insertNode,l));
+	    shape.deps[insertNode(insertNode,l)]+=w;
 	},
-	      [&testNode](const Source& s)
+	      [&shape](const Source& s)
 	      {
-		testNode->shape.op=s;
+		shape.op=s;
 	      }},line.data);
 	
-	return &**nodes.insert(std::move(testNode)).first;
+	auto it=nodes.find(shape);
+	
+	if(it==nodes.end())
+	  it=nodes.insert(std::make_unique<Node>(std::move(shape))).first;
+	
+	return it->get();
       };
     
     for(const Line& line : lines)
       insertNode(insertNode,line);
     
+    // Set idx
+
     // Add users
     for(auto& n : nodes)
-      for(Node* d : n->shape.deps)
+      for(auto [d,w] : n->shape.deps)
 	d->users.push_back(&*n);
     
     // report
