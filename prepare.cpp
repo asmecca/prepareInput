@@ -2,6 +2,7 @@
 #include <array>
 #include <cstdarg>
 #include <cstddef>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -154,6 +155,30 @@ void internal_crash(const int& line,
   exit(1);
 }
 
+std::vector<std::string> breakStringAt(const char* str,
+				       const char& d)
+{
+  std::vector<std::string> res;
+  
+  const char* p=str;
+  
+  const char* b=p;
+  
+  while(*b!='\0')
+    {
+      const char* e=b;
+      
+      while(*e!='\0' and *e!=d)
+	e++;
+      
+      res.emplace_back(b,e);
+      
+      b=e+(*e!='\0');
+    }
+  
+  return res;
+}
+
 /////////////////////////////////////////////////////////////////
 
 template <typename T,
@@ -242,6 +267,38 @@ struct BasePar
     return *static_cast<const D*>(this);
   }
   
+  std::string describe() const
+  {
+    const D& d=~*this;
+    
+    std::ostringstream os;
+    os<<D::name<<"(";
+    
+    const auto listPars=
+      [&os,
+       names=d.memberNames()](const auto& listPars,
+			      const size_t& i,
+			      const auto& head,
+			      const auto&...tail)
+      {
+	os<<names[i]<<"="<<head;
+	if constexpr(sizeof...(tail))
+	  {
+	    os<<",";
+	    listPars(listPars,i+1,tail...);
+	  }
+      };
+    
+    std::apply([&listPars](const auto&...args)
+    {
+      listPars(listPars,0,args...);
+    },d.getMembers());
+    
+    os<<")";
+    
+    return os.str();
+  }
+  
   size_t hash() const
   {
     return hashCombine(std::hash<int>{}(id),
@@ -250,6 +307,20 @@ struct BasePar
   
   constexpr std::partial_ordering operator<=>(const BasePar&) const=default;
 };
+
+#define PROVIDE_MEMBERS(NAME,				\
+			ARGS...)			\
+  static constexpr const char* name{#NAME};		\
+  							\
+  auto getMembers() const				\
+  {							\
+    return std::tie(ARGS);				\
+  }							\
+  							\
+  const std::vector<std::string> memberNames() const	\
+  {							\
+    return breakStringAt(#ARGS,',');			\
+  }
 
 struct Smear :
   BasePar<Smear>
@@ -260,19 +331,11 @@ struct Smear :
   
   Momentum mom{};
   
-  auto getMembers() const
-  {
-    return std::tie(kappa,n,mom);
-  }
+  PROVIDE_MEMBERS(Smear,kappa,n,mom);
   
   Smear dag() const
   {
     return *this;
-  }
-  
-  std::string describe() const
-  {
-    return (std::ostringstream()<<"smear(kappa="<<kappa<<",n="<<n<<",mom="<<mom<<")").str();
   }
   
   constexpr std::partial_ordering operator<=>(const Smear&) const=default;
@@ -283,15 +346,7 @@ struct Phase :
 {
   Momentum mom;
   
-  auto getMembers() const
-  {
-    return std::tie(mom);
-  }
-  
-  std::string describe() const
-  {
-    return (std::ostringstream()<<"phase(mom="<<mom<<")").str();
-  }
+  PROVIDE_MEMBERS(Phase,mom);
   
   Phase dag() const
   {
@@ -310,15 +365,7 @@ struct Gamma :
 {
   size_t iGamma{};
   
-  auto getMembers() const
-  {
-    return std::tie(iGamma);
-  }
-  
-  std::string describe() const
-  {
-    return (std::ostringstream()<<"gamma(iGamma="<<iGamma<<")").str();
-  }
+  PROVIDE_MEMBERS(Gamma,iGamma);
   
   Gamma dag() const
   {
@@ -333,15 +380,7 @@ struct DeltaT :
 {
   size_t t;
   
-  auto getMembers() const
-  {
-    return std::tie(t);
-  }
-  
-  std::string describe() const
-  {
-    return (std::ostringstream()<<"deltaT(t="<<t<<")").str();
-  }
+  PROVIDE_MEMBERS(DeltaT,t);
   
   DeltaT dag() const
   {
@@ -559,20 +598,18 @@ Oper operator*(const Oper& a,
   return c;
 }
 
-struct Source
+struct Source :
+  BasePar<Source>
 {
   inline static size_t glbCount{};
   
   size_t count;
   
+  PROVIDE_MEMBERS(Source,count);
+  
   size_t hash() const
   {
     return hashTuple(std::tie(count));
-  }
-  
-  std::string describe() const
-  {
-    return (std::ostringstream()<<"source(count="<<count<<")").str();
   }
   
   Source()
@@ -924,8 +961,12 @@ struct Node
       std::ostringstream os;
       
       os<<">>> "<<::describe(op)<<" on (";
-      for(const auto& [n,w] : deps)
-	os<<w<<" * "<<::describe(*n)<<" ";
+      for(int i{};const auto& [n,w] : deps)
+	{
+	  if(i++)
+	    os<<" + ";
+	  os<<w<<" * "<<::describe(*n)<<" ";
+	}
       os<<")";
       
       return os.str();
@@ -968,18 +1009,56 @@ struct Node
   
   std::vector<Node*> users;
   
-  std::string describe() const
-  {
-    return shape.describe();
-  }
-  
   int id;
   
-  int remainingUses;
+  size_t nRemainingUsers;
   
-  int remainingDeps;
+  size_t nScheduledDeps;
   
-  int weight;
+  size_t lastUse;
+  
+  bool isFreeable() const
+  {
+    return nRemainingUsers==0;
+  }
+  
+  bool isReadyForSchedule() const
+  {
+    return nScheduledDeps==shape.deps.size();
+  }
+  
+  std::string describe() const
+  {
+    std::ostringstream os;
+    
+    os<<">>> P"<<id<<" "<<" (";
+    for(int i{};const auto& [n,w] : shape.deps)
+      {
+	if(i++)
+	  os<<" + ";
+	os<<w<<" * P"<<n->id<<" ";
+      }
+    os<<")";
+    
+    return os.str();
+    
+    //return shape.describe();
+  }
+  
+  int nFreedIfRun() const
+  {
+    int nFreed=0;
+    for(const auto& [d,w] : shape.deps)
+      if(d->nRemainingUsers==1)
+	nFreed++;
+    
+    return nFreed;
+  }
+  
+  std::pair<int,int> readyness() const
+  {
+    return {nFreedIfRun(),-nRemainingUsers};
+  }
 };
 
 struct Contracter
@@ -1007,36 +1086,14 @@ struct Contracter
   
   void compile()
   {
-    std::set<Line> lines;
-    
-    for(const auto& [a,b] : traces)
-      for(const Line& l : {a,b})
-	lines.insert(l);
-    
     std::unordered_set<std::unique_ptr<Node>,
 		       Node::Hasher,
 		       Node::Comparer> nodes;
     
-    auto insertNode=
-      [&nodes](auto&& insertNode,
-	       const Line& line)->Node*
+    auto maybeActuallyInsertNode=
+      [&nodes](Node::Shape&& shape)
       {
-	Node::Shape shape;
-	
-	std::visit(Overload{[&shape,
-			     &insertNode](const Extender& e)
-	{
-	  shape.op=e.pars;
-	  
-	  for(const auto& [w,l] : e.rhs)
-	    shape.deps[insertNode(insertNode,l)]+=w;
-	},
-	      [&shape](const Source& s)
-	      {
-		shape.op=s;
-	      }},line.data);
-	
-	auto it=nodes.find(shape);
+    	auto it=nodes.find(shape);
 	
 	if(it==nodes.end())
 	  it=nodes.insert(std::make_unique<Node>(std::move(shape))).first;
@@ -1044,25 +1101,161 @@ struct Contracter
 	return it->get();
       };
     
-    for(const Line& line : lines)
-      insertNode(insertNode,line);
+    auto insertLine=
+      [&maybeActuallyInsertNode](auto&& insertLine,
+				 const Line& line)->Node*
+      {
+	Node::Shape shape;
+	
+	std::visit(Overload{[&shape,
+			     &insertLine](const Extender& e)
+	{
+	  shape.op=e.pars;
+	  
+	  for(const auto& [w,l] : e.rhs)
+	    shape.deps[insertLine(insertLine,l)]+=w;
+	},
+	      [&shape](const Source& s)
+	      {
+		shape.op=s;
+	      }},line.data);
+	
+	return maybeActuallyInsertNode(std::move(shape));
+      };
     
-    // Set idx
-
+    /// Avoid inserting too many times
+    std::map<Line,Node*> linesToNode;
+    
+    for(const std::pair<Line,Line> &contr : traces)
+      {
+	std::array<const Line*,2> linesOfContr{&contr.first,&contr.second};
+	
+	Node::Shape contrShape{.op=pars};
+	for(int i=0;i<2;i++)
+	  {
+	    const Line& l=*linesOfContr[i];
+	    
+	    auto it=linesToNode.find(l);
+	    if(it==linesToNode.end())
+	      it=linesToNode.insert(std::pair{l,insertLine(insertLine,l)}).first;
+	    
+	    contrShape.deps[it->second]+=1.0;
+	  }
+	
+	maybeActuallyInsertNode(std::move(contrShape));
+    }
+    
+    // Label nodes
+    for(int i=0;const std::unique_ptr<Node>& n : nodes)
+      n->id=i++;
+    
     // Add users
     for(auto& n : nodes)
       for(auto [d,w] : n->shape.deps)
-	d->users.push_back(&*n);
+	  d->users.push_back(&*n);
+    
+    // Reset the remaining user and scheduled deps
+    for(auto& n : nodes)
+      {
+	n->nRemainingUsers=n->users.size();
+	n->nScheduledDeps=0;
+	n->lastUse=std::numeric_limits<size_t>::max();
+      }
     
     // report
     cout<<"==========="<<endl;
     for(const auto& n : nodes)
       {
 	cout<<describe(*n)<<endl;
-	cout<<" users:"<<endl;
-	for(const Node* u : n->users)
-	  cout<<"  "<<describe(*u)<<endl;
+	cout<<" used by "<<n->users.size()<<endl;
+	// 	cout<<" users:"<<endl;
+    // 	for(const Node* u : n->users)
+    // 	  cout<<"  "<<describe(*u)<<endl;
       }
+    
+    std::vector<Node*> readyNodes;
+    std::vector<Node*> executeList;
+    
+    for(const std::unique_ptr<Node>& n : nodes)
+      if(n->shape.deps.empty())
+        readyNodes.push_back(n.get());
+    
+    while(not readyNodes.empty())
+      {
+	std::sort(readyNodes.begin(),
+		  readyNodes.end(),
+		  [](const Node* a,
+		     const Node* b)
+		  {
+		    return a->readyness()<b->readyness();
+		  });
+	
+	cout<<"Ready nodes:"<<endl;
+	for(const Node* n : readyNodes)
+	  cout<<describe(*n)<<" nFreed if run: "<<n->nFreedIfRun()<<endl;
+	
+	Node* toBeRun=readyNodes.back();
+	readyNodes.pop_back();
+	if(readyNodes.empty())
+	  cout<<"Chosen the only possible node"<<endl;
+	
+	executeList.push_back(toBeRun);
+	
+	for(const auto& [d,w] : toBeRun->shape.deps)
+	  {
+	    d->nRemainingUsers--;
+	    if(d->isFreeable())
+	      {
+		cout<<"Now "<<describe(*d)<<" is freeable at step "<<executeList.size()<<endl;
+		d->lastUse=executeList.size()-1;
+	      }
+	  }
+	
+	for(Node* user : toBeRun->users)
+	  {
+	    user->nScheduledDeps++;
+	    if(user->isReadyForSchedule())
+	      readyNodes.push_back(user);
+	  }
+	cout<<"-------"<<endl;
+      }
+    
+    // Check
+    for(const std::unique_ptr<Node>& n : nodes)
+      if(not n->isReadyForSchedule())
+	CRASH("Node %s not scheduled",n->describe().c_str());
+    
+    cout<<"/////////////////////////////////////////////////////////////////"<<endl;
+    
+    cout<<"Final schedule: "<<endl;
+    int memoryPressure=0;
+    
+    auto freeWhatPossible=
+      [&nodes](const size_t& i)
+      {
+	std::vector<Node*> freeable;
+	for(const std::unique_ptr<Node>& maybeFreeable : nodes)
+	  if(i and maybeFreeable->lastUse==i)
+	    freeable.push_back(maybeFreeable.get());
+	
+	if(freeable.size())
+	  for(const Node* f : freeable)
+	      cout<<" Free:("<<describe(*f)<<")"<<endl;
+	
+	return freeable.size();
+      };
+    
+    for(size_t i=0;i<executeList.size();i++)
+      {
+	const Node& n=*executeList[i];
+	memoryPressure++;
+	cout<<i<<" -- mp: "<<memoryPressure<<" -- "<<describe(n)<<endl;
+	
+	memoryPressure-=freeWhatPossible(i);
+      }
+    
+    memoryPressure-=freeWhatPossible(executeList.size());
+    cout<<"Final memory pressure: "<<memoryPressure<<endl;
   }
 };
 
