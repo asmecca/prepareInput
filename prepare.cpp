@@ -309,8 +309,11 @@ struct BasePar
 };
 
 #define PROVIDE_MEMBERS(NAME,				\
+			TAG,				\
 			ARGS...)			\
   static constexpr const char* name{#NAME};		\
+  							\
+  static constexpr const char* tag{#TAG};		\
   							\
   auto getMembers() const				\
   {							\
@@ -331,7 +334,12 @@ struct Smear :
   
   Momentum mom{};
   
-  PROVIDE_MEMBERS(Smear,kappa,n,mom);
+  PROVIDE_MEMBERS(Smear,SM,kappa,n,mom);
+  
+  std::string emit() const
+  {
+    return (std::ostringstream()<<kappa<<"                      "<<n<<"              "<<mom[0]<<"     "<<mom[1]<<"     "<<mom[2]<<"              0").str();
+  }
   
   Smear dag() const
   {
@@ -346,7 +354,12 @@ struct Phase :
 {
   Momentum mom;
   
-  PROVIDE_MEMBERS(Phase,mom);
+  PROVIDE_MEMBERS(Phase,PH,mom);
+  
+  std::string emit() const
+  {
+    return (std::ostringstream()<<"                                               "<<mom[0]<<"     "<<mom[1]<<"     "<<mom[2]<<"              0").str();
+  }
   
   Phase dag() const
   {
@@ -365,7 +378,12 @@ struct Gamma :
 {
   size_t iGamma{};
   
-  PROVIDE_MEMBERS(Gamma,iGamma);
+  PROVIDE_MEMBERS(Gamma,G,iGamma);
+  
+  std::string emit() const
+  {
+    return (std::ostringstream()<<"                           "<<iGamma<<"   0                          0").str();
+  }
   
   Gamma dag() const
   {
@@ -380,7 +398,12 @@ struct DeltaT :
 {
   size_t t;
   
-  PROVIDE_MEMBERS(DeltaT,t);
+  PROVIDE_MEMBERS(DeltaT,S,t);
+  
+  std::string emit() const
+  {
+    return (std::ostringstream()<<"                                  0     0.0                                      0").str();
+  }
   
   DeltaT dag() const
   {
@@ -405,14 +428,11 @@ struct Prop :
   
   double residue{};
   
-  auto getMembers() const
-  {
-    return std::tie(kappa,mass,r,charge,mom,residue);
-  }
+  PROVIDE_MEMBERS(Prop,-,kappa,mass,r,charge,mom,residue)
   
-  std::string describe() const
+  std::string emit() const
   {
-    return (std::ostringstream()<<"prop(kappa="<<kappa<<",mass="<<mass<<",r="<<r<<",charge="<<charge<<",mom="<<mom<<",residue="<<residue<<")").str();
+    return (std::ostringstream()<<kappa<<"     "<<mass<<"   "<<r<<"     "<<charge<<"     "<<mom[0]<<"     "<<mom[1]<<"     "<<mom[2]<<"       "<<residue<<"   0").str();
   }
   
   Prop dag() const
@@ -605,7 +625,9 @@ struct Source :
   
   size_t count;
   
-  PROVIDE_MEMBERS(Source,count);
+  int tSelect{0};
+  
+  PROVIDE_MEMBERS(Source,SO,count,tSelect);
   
   size_t hash() const
   {
@@ -617,9 +639,13 @@ struct Source :
     count=glbCount++;
   }
   
+  std::string emit(const std::string& name) const
+  {
+    return (std::ostringstream()<<name<<"           Z4              "<<tSelect<<"       0").str();
+  }
+  
   constexpr std::partial_ordering operator<=>(const Source&) const=default;
 };
-
 
 struct Line;
 
@@ -820,38 +846,36 @@ std::string describe(const T& t)
 size_t Line::maybeRemoveUselessScalar()
 {
   // Check if is an extender
-  Extender* e=
-    std::get_if<Extender>(&this->data);
   
   // Nested remove
   int nDeep{};
-  if(e)
-    for(auto& [w,l] : e->rhs)
-    nDeep+=l.maybeRemoveUselessScalar();
-  
-  // maybe remove this if 1) is scalar 2) is trivially nesting 3) extends an extender 4) has no time selection
-  
-  Line* nestedRhs=
-    e?e->maybeGetTrivialRhs():nullptr;
-  
-  if(e and nestedRhs)
+  if(Extender* e=
+     std::get_if<Extender>(&this->data))
     {
-      if(e->isScalar() and e->tSelect==-1)
-	{
-	  *this=*nestedRhs;
-	  
-	  return nDeep+1;
-	}
+      for(auto& [w,l] : e->rhs)
+	nDeep+=l.maybeRemoveUselessScalar();
       
-      Extender* nestedE=
-	std::get_if<Extender>(&nestedRhs->data);
-      
-      if(nestedE->isScalar() and e->tSelect==-1)
+      if(Line* nestedRhs=e->maybeGetTrivialRhs())
 	{
-	  e->tSelect=nestedE->tSelect;
-	  e->rhs=std::move(nestedE->rhs);
+	  if(Source* nestedS=
+	    std::get_if<Source>(&nestedRhs->data);
+	     e->isScalar() and (e->tSelect==-1 or (nestedS and nestedS->tSelect==e->tSelect)))
+	    {
+	      *this=*nestedRhs;
+	      
+	      return nDeep+1;
+	    }
 	  
-	  return nDeep+1;
+	  Extender* nestedE=
+	    std::get_if<Extender>(&nestedRhs->data);
+	  
+	  if(nestedE->isScalar() and e->tSelect==-1)
+	    {
+	      e->tSelect=nestedE->tSelect;
+	      e->rhs=std::move(nestedE->rhs);
+	      
+	      return nDeep+1;
+	    }
 	}
     }
   
@@ -1011,6 +1035,8 @@ struct Node
   
   int id;
   
+  std::string name;
+  
   size_t nRemainingUsers;
   
   size_t nScheduledDeps;
@@ -1041,8 +1067,6 @@ struct Node
     os<<")";
     
     return os.str();
-    
-    //return shape.describe();
   }
   
   int nFreedIfRun() const
@@ -1256,6 +1280,51 @@ struct Contracter
     
     memoryPressure-=freeWhatPossible(executeList.size());
     cout<<"Final memory pressure: "<<memoryPressure<<endl;
+    
+    cout<<"/////////////////////////////////////////////////////////////////"<<endl;
+    
+    size_t iSource{};
+    size_t iOp{};
+    for(Node* n : executeList)
+      if(n->name.empty())
+	n->name=std::visit(Overload{[&iSource](const Source& source)
+	{
+	  return "SOURCE"+std::to_string(iSource++);
+	},
+	      [&iOp](const Pars& pars)
+	      {
+		return "P"+std::to_string(iOp++);
+	      },
+	      [](const Contr& contr)
+		{
+		  return contr.name;
+		}},n->shape.op);
+	
+    for(const Node* n : executeList)
+      {
+	if(const Pars* p=std::get_if<Pars>(&n->shape.op))
+	    std::visit([&n](const auto& par)
+	    {
+	      std::ostringstream os;
+	      
+	      os<<n->name<<" ";
+	      
+	      os<<std::remove_reference_t<decltype(par)>::tag<<" ";
+	      
+	      if(n->shape.deps.size()==1 and n->shape.deps.begin()->second==1.0)
+		os<<n->shape.deps.begin()->first-> name<<" ";
+	      else
+		{
+		  os<<"LINCOMB "<<n->shape.deps.size()<<" ";
+		  for(const auto& [d,w] : n->shape.deps)
+		    os<<d->name<<" "<<w<<" ";
+		}
+	      
+	      os<<par.emit();
+	      
+	      cout<<os.str()<<endl;
+	    },*p);
+      }
   }
 };
 
@@ -1282,123 +1351,62 @@ bool Extender::isScalar() const
 
 int main()
 {
-  const Momentum mom{0,1,0};
+  const Source eta{};
   
-  const Smear sme{.kappa=0.4,.n=40,.mom=mom};
-  const Phase phase{.mom=2*mom};
-  const DeltaT deltaT{.t=3};
+  const Momentum momP{1,1,1};
+  const Momentum momM=-momP;
+  const Gamma P5{.iGamma=5};
+  const Smear smeP{.kappa=0.4,.n=40,.mom=momP};
+  const Smear smeM{.kappa=0.4,.n=40,.mom=momM};
+  const Phase phaseP{.mom=momP};
+  const Phase phaseM{.mom=momM};
+  const Phase phase2M{.mom=2*momM};
   
-  Prop prop{.kappa=0.133,.mass=0.02,.r=1,.charge=0.0,.residue=0.0011};
+  Prop prop{.kappa=0.133,.mass=0.02,.r=1,.charge=0.0,.residue=1e-10};
+
+  Contracter dir("dir");
+  dir.addGammas(5,5);
+  dir(smeP*phaseM*prop*smeP*phaseM*eta,smeP*phaseM*smeM*prop*smeM*phaseP*eta);
   
-  const Oper op1=prop*sme*deltaT*phase*sme;
-  const Oper op2=phase*sme*sme;
+  // Contracter tri("tri");
+  // tri.addGammas(1,5);
+  // for(size_t t=0;t<2;t++)
+  //   tri(prop*smeP*phaseM*eta,prop.dag()*smeP*phase2M*P5*smeM*Phase{.mom{0,0,(double)t}}*prop*smeM*phaseP*eta);
   
-  std::vector<Oper> operations{op1,op2};
-  // UnorderedInstructions unorderedInstructions=compile(operations);
+  // Contracter box("box");
+  // box.addGammas(1,5);
+  // for(size_t t=0;t<2;t++)
+  //   tri(prop*smeP*phaseM*eta,prop.dag()*smeP*phase2M*P5*smeM*Phase{.mom{0,0,(double)t}}*prop*smeM*phaseP*eta);
   
-  // const auto describe=
-  //   [](const Command& command)
+  // const Oper op1=prop*sme*deltaT*phase*sme;
+  // const Oper op2=phase*sme*sme;
+  
+  // std::vector<Oper> operations{op1,op2};
+
+  // Line a=op2*(op1*eta+eta);
+  // Line b=op2*eta;
+  
+  // const Oper* o=&op1;
+  // while(o)
   //   {
-  //     const auto& [lhs,pars,source]=command;
-      
-  //     std::ostringstream os;
-  //     os<<lhs<<" = " <<::describe(pars)<<" * "<<source;
-      
-  //     return os.str();
-  //   };
-  
-  // cout<<"Unordered instructions ("<<unorderedInstructions.instructions.size()<<" instr):"<<endl;
-  // for(const Command& command : unorderedInstructions.instructions)
-  //   cout<<" "<<describe(command)<<endl;
-  // cout<<endl;
-  
-  Source eta{};
-  Line a=op2*(op1*eta+eta);
-  Line b=op2*eta;
-  
-  const Oper* o=&op1;
-  while(o)
-    {
-      cout<<describe(o->pars)<<endl;
-      o=&*o->rhs;
-    }
-  
-  
-  cout<<describe(a)<<endl;
-  
-  
-  Smear sme1{.kappa=0.1};
-  Pars s{sme1};
-  cout<<sme1.hash()<<endl;
-  cout<<std::hash<Pars>{}(s)<<endl;
-  
-  Contracter box("box");
-  box.addGammas(5,5);
-  box(a,b);
-  
-  box.compile();
-  
-  // Compiler compiler;
-  // compiler.compile(box);
-  
-  // cout<<endl;
-  // for(const auto& [l,deps] : compiler.dependencies)
-  //   {
-  //     cout<<describe(l)<<endl;
-  //     for(const auto& d : deps)
-  // 	cout<<" "<<std::visit(Overload{[](const Line& line)
-  // 	{
-  // 	  return describe(line);
-  // 	},
-  // 	      [](const std::pair<Line,Line>& contr)->std::string
-  // 	      {
-  // 		return "contr";
-  // 	      }},d)<<endl;
-  //     cout<<endl;
+  //     cout<<describe(o->pars)<<endl;
+  //     o=&*o->rhs;
   //   }
   
-  // Executable executable;
   
-  // std::map<size_t,size_t> dependenciesMultiplicity;
-  // for(const auto& [lhs,pars,sources] : unorderedInstructions.instructions)
-  //   for(const size_t& source : sources)
-  //    dependenciesMultiplicity[source]++;
+  // cout<<describe(a)<<endl;
   
-  // while(executable.instructions.size()!=unorderedInstructions.instructions.size())
-  //   {
-  //     cout<<"NResidual instructions: "<<unorderedInstructions.instructions.size()-executable.instructions.size()<<endl;
-      
-  //     std::vector<std::pair<size_t,size_t>> eligibleCommands;
-      
-  //     for(size_t i=0;const auto& [lhs,pars,sources] : unorderedInstructions.instructions)
-  // 	{
-  // 	  if(not executable.contains(lhs) and executable.contains(sources))
-  // 	    eligibleCommands.emplace_back(i,dependenciesMultiplicity[lhs]);
-	  
-  // 	  i++;
-  // 	}
-      
-  //     std::sort(eligibleCommands.begin(),eligibleCommands.end(),[](const std::pair<size_t,size_t>& a,
-  // 								   const std::pair<size_t,size_t>& b)
-  //     {
-  // 	return a.second<b.second;
-  //     });
-      
-  //     cout<<"Eligible commands:"<<endl;
-  //     for(const auto& [iLhs,nDep] : eligibleCommands)
-  // 	cout<<" "<<describe(unorderedInstructions.instructions[iLhs])<<" holds "<<nDep<<" other instructions"<<endl;
-  //     cout<<endl;
-      
-  //     if(eligibleCommands.empty())
-  // 	CRASH("no eligible command");
-      
-  //     executable.instructions.push_back(unorderedInstructions.instructions[eligibleCommands.back().first]);
-  //   }
   
-  // cout<<"Final program:"<<endl;
-  // for(const Command& command : executable.instructions)
-  //   cout<<" "<<describe(command)<<endl;
-  // cout<<endl;
+  // Smear sme1{.kappa=0.1};
+  // Pars s{sme1};
+  // cout<<sme1.hash()<<endl;
+  // cout<<std::hash<Pars>{}(s)<<endl;
+  
+  // Contracter box("box");
+  // box.addGammas(5,5);
+  // box(a,b);
+  
+  dir.compile();
   
   return 0;
 }
