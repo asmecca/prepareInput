@@ -1271,17 +1271,23 @@ struct Contracter
 	  if(i and maybeFreeable->lastUse==i)
 	    freeable.push_back(maybeFreeable.get());
 	
+	size_t nReallyFreed=0;
 	if(freeable.size())
 	  for(const Node* f : freeable)
+	    {
 	      cout<<" Free:("<<describe(*f)<<")"<<endl;
+	      if(std::holds_alternative<Pars>(f->shape.op))
+		nReallyFreed++;
+	    }
 	
-	return freeable.size();
+	return nReallyFreed;
       };
     
     for(size_t i=0;i<executeList.size();i++)
       {
 	const Node& n=*executeList[i];
-	memoryPressure++;
+	if(std::holds_alternative<Pars>(n.shape.op))
+	   memoryPressure++;
 	cout<<i<<" -- mp: "<<memoryPressure<<" -- "<<describe(n)<<endl;
 	
 	memoryPressure-=freeWhatPossible(i);
