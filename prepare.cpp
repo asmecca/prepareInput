@@ -682,6 +682,8 @@ struct Line
 {
   std::variant<Extender,Source> data;
   
+  std::string name;
+  
   bool isExtender() const
   {
     return std::holds_alternative<Extender>(data);
@@ -748,6 +750,12 @@ struct Line
   constexpr std::partial_ordering operator<=>(const Line&) const=default;
   
   Line(const Line&)=default;
+  
+  Line(const Line& oth,
+       const std::string& name) :
+    data(oth.data),name(name)
+  {
+  }
   
   template <typename T>
   requires std::constructible_from<decltype(data),T>
@@ -1031,11 +1039,11 @@ struct Node
   
   Shape shape;
   
+  std::string name;
+  
   std::vector<Node*> users;
   
   int id;
-  
-  std::string name;
   
   size_t nRemainingUsers;
   
@@ -1115,12 +1123,13 @@ struct Contracter
 		       Node::Comparer> nodes;
     
     auto maybeActuallyInsertNode=
-      [&nodes](Node::Shape&& shape)
+      [&nodes](Node::Shape&& shape,
+	       const std::string& name="")
       {
     	auto it=nodes.find(shape);
 	
 	if(it==nodes.end())
-	  it=nodes.insert(std::make_unique<Node>(std::move(shape))).first;
+	  it=nodes.insert(std::make_unique<Node>(std::move(shape),name)).first;
 	
 	return it->get();
       };
@@ -1144,7 +1153,7 @@ struct Contracter
 		shape.op=s;
 	      }},line.data);
 	
-	return maybeActuallyInsertNode(std::move(shape));
+	return maybeActuallyInsertNode(std::move(shape),line.name);
       };
     
     /// Avoid inserting too many times
@@ -1366,7 +1375,9 @@ int main()
 
   Contracter dir("dir");
   dir.addGammas(5,5);
-  dir(smeP*phaseM*prop*smeP*phaseM*eta,smeP*phaseM*smeM*prop*smeM*phaseP*eta);
+  Line bw(phaseM*smeP*prop*smeP*phaseM*eta,"bw");
+  Line fw(phaseP*smeM*prop*smeM*phaseP*eta,"fw");
+  dir(bw,fw);
   
   // Contracter tri("tri");
   // tri.addGammas(1,5);
