@@ -517,21 +517,6 @@ struct Oper
   
   std::unique_ptr<Oper> rhs;
   
-  // std::variant<Pars,std::vector<std::pair<double,Oper>>> pars;
-  
-  // template <typename T>
-  // requires std::constructible_from<decltype(pars),T>
-  // Oper(const T& args) :
-  //   pars{args}
-  // {
-  // }
-  
-  // Oper asList() const
-  // {
-  //   if(std::holds_alternative<Pars>(pars))
-  //     return std::vector{std::make_pair(1.0,*this)};
-  //   else
-  //     return *this;
   /// Dagger of an operation
   Oper dag() const
   {
@@ -563,21 +548,6 @@ struct Oper
      pars{pars}
   {
   }
-  
-  // std::string describe() const
-  // {
-  //   std::string t=::describe(pars);
-    
-  //   if(rhs)
-  //     t+="*"+rhs->describe();
-    
-  //   return t;
-  // }
-  
-  // size_t hash() const
-  // {
-  //   return std::hash<std::string>{}(describe());
-  // }
   
   constexpr bool operator==(const Oper& other) const
   {
@@ -649,13 +619,34 @@ struct Source :
 
 struct Line;
 
-struct Extender
+struct ExtendSelectingTPars
 {
   Pars pars;
   
-  std::vector<std::pair<double,Line>> rhs;
-  
   int tSelect{-1};
+  
+  size_t hash() const
+  {
+    return hashTuple(std::tie(pars,tSelect));
+  }
+  
+  std::string describe() const
+  {
+    std::string res=::describe(pars);
+    if(tSelect!=-1)
+      res+="deltaT("+std::to_string(tSelect)+")";
+    
+    return res;
+  }
+  
+  std::partial_ordering operator<=>(const ExtendSelectingTPars&) const=default;
+};
+
+struct Extender
+{
+  ExtendSelectingTPars op;
+  
+  std::vector<std::pair<double,Line>> rhs;
   
   std::string describe() const;
   
@@ -667,7 +658,7 @@ struct Extender
   
   bool isSelectingTime() const
   {
-    return tSelect!=-1;
+    return op.tSelect!=-1;
   }
   
   Line* maybeGetTrivialRhs();
@@ -695,15 +686,15 @@ struct Line
       std::visit(Overload{[](Extender& extender) -> size_t
       {
 	const DeltaT* dt=
-	  std::get_if<DeltaT>(&extender.pars);
+	  std::get_if<DeltaT>(&extender.op.pars);
 	
 	size_t n=
 	  dt!=nullptr;
 	
 	if(n)
 	  {
-	    extender.tSelect=dt->t;
-	    extender.pars=Gamma{.iGamma=0};
+	    extender.op.tSelect=dt->t;
+	    extender.op.pars=Gamma{.iGamma=0};
 	  }
 	
 	for(auto& [w,l] : extender.rhs)
@@ -728,14 +719,14 @@ struct Line
   Line(const Pars& pars,
        const std::vector<std::pair<double,Line>>& rhs,
        const int tSelect=-1) :
-    data{Extender{pars,rhs,tSelect}}
+    data{Extender{ExtendSelectingTPars{.pars=pars,.tSelect=tSelect},rhs}}
   {
     trySimplify();
   }
   
   Line(const Oper& oper,
        const Line& line) :
-    data(Extender{oper.pars})
+    data(Extender{{.pars=oper.pars}})
   {
     Extender& e=*std::get_if<Extender>(&data);
     
@@ -779,13 +770,13 @@ constexpr bool Extender::operator==(const Extender&) const=default;
 
 constexpr std::partial_ordering Extender::operator<=>(const Extender& other) const
 {
-  if(auto cmp=pars<=>other.pars;cmp!=0)
+  if(auto cmp=op<=>other.op;cmp!=0)
     return cmp;
   
   if(auto cmp=rhs<=>other.rhs;cmp!=0)
     return cmp;
   
-  return tSelect<=>other.tSelect;
+  return op.tSelect<=>other.op.tSelect;
 }
 
 bool Extender::isExtendingSource() const
@@ -804,14 +795,14 @@ Line* Extender::maybeGetTrivialRhs()
 std::string Extender::describe() const
 {
   std::ostringstream os;
-  os<<::describe(pars);
+  os<<op.describe();
   
   if(rhs.size()==0)
     CRASH("cannot describe a line extender which does not extend an existing line");
   else
     {
-      if(tSelect!=-1)
-	os<<"*"<<::describe(DeltaT{.t=(size_t)tSelect});
+      if(op.tSelect!=-1)
+	os<<"*"<<::describe(DeltaT{.t=(size_t)op.tSelect});
       
       os<<"*";
       
@@ -867,7 +858,7 @@ size_t Line::maybeRemoveUselessScalar()
 	{
 	  if(Source* nestedS=
 	    std::get_if<Source>(&nestedRhs->data);
-	     e->isScalar() and (e->tSelect==-1 or (nestedS and nestedS->tSelect==e->tSelect)))
+	     e->isScalar() and (e->op.tSelect==-1 or (nestedS and nestedS->tSelect==e->op.tSelect)))
 	    {
 	      *this=*nestedRhs;
 	      
@@ -877,9 +868,9 @@ size_t Line::maybeRemoveUselessScalar()
 	  Extender* nestedE=
 	    std::get_if<Extender>(&nestedRhs->data);
 	  
-	  if(nestedE->isScalar() and e->tSelect==-1)
+	  if(nestedE->isScalar() and e->op.tSelect==-1)
 	    {
-	      e->tSelect=nestedE->tSelect;
+	      e->op.tSelect=nestedE->op.tSelect;
 	      e->rhs=std::move(nestedE->rhs);
 	      
 	      return nDeep+1;
@@ -923,7 +914,7 @@ Line operator*(const Line& line,
 Line operator+(const Line& a,
 	       const Line& b)
 {
-  if(const Extender *ae=std::get_if<Extender>(&a.data),*be=std::get_if<Extender>(&b.data);ae and be and ae->pars==be->pars)
+  if(const Extender *ae=std::get_if<Extender>(&a.data),*be=std::get_if<Extender>(&b.data);ae and be and ae->op==be->op)
     {
       Extender res=*ae;
       
@@ -932,7 +923,7 @@ Line operator+(const Line& a,
       return res;
     }
   else
-    return Extender(Gamma{.iGamma=0},std::vector{std::make_pair(1.0,a),{1.0,b}});
+    return Extender{.op{.pars{Gamma{.iGamma=0}}},.rhs{std::vector{std::make_pair(1.0,a),{1.0,b}}}};
 }
 
 struct Contr
@@ -970,7 +961,7 @@ struct Node
     {
       const T& t=*static_cast<const T*>(this);
       
-      return hashTuple(std::tie(t.op,t.deps));
+      return hashTuple(std::tie(t.task,t.deps));
     }
     
     constexpr std::partial_ordering operator<=>(const Hashability&) const=default;
@@ -979,10 +970,10 @@ struct Node
   struct Shape :
     Hashability<Shape>
   {
-    using Op=
-      std::variant<Pars,Contr,Source>;
+    using Task=
+      std::variant<Contr,ExtendSelectingTPars,Source>;
     
-    Op op;
+    Task task;
     
     std::map<Node*,double> deps;
     
@@ -992,14 +983,23 @@ struct Node
     {
       std::ostringstream os;
       
-      os<<">>> "<<::describe(op)<<" on (";
-      for(int i{};const auto& [n,w] : deps)
+      os<<">>> "<<::describe(task);
+
+      if(deps.size())
 	{
-	  if(i++)
-	    os<<" + ";
-	  os<<w<<" * "<<::describe(*n)<<" ";
+	  os<<" on (";
+	  for(int i{};const auto& [n,w] : deps)
+	    {
+	      if(i++)
+		os<<" + ";
+	      
+	      if(w!=1)
+		os<<w<<" * ";
+	      
+	      os<<::describe(*n)<<" ";
+	    }
+	  os<<")";
 	}
-      os<<")";
       
       return os.str();
     }
@@ -1065,14 +1065,7 @@ struct Node
   {
     std::ostringstream os;
     
-    os<<">>> P"<<id<<" "<<" (";
-    for(int i{};const auto& [n,w] : shape.deps)
-      {
-	if(i++)
-	  os<<" + ";
-	os<<w<<" * P"<<n->id<<" ";
-      }
-    os<<")";
+    return shape.describe();
     
     return os.str();
   }
@@ -1115,68 +1108,93 @@ struct Contracter
   {
     traces.emplace(bw,fw);
   }
+};
+
+struct Compiler
+{
+  std::vector<std::unique_ptr<Contracter>> contracters;
+  
+  std::unordered_set<std::unique_ptr<Node>,
+		     Node::Hasher,
+		     Node::Comparer> nodes;
+  
+  std::vector<Node*> executeList;
+  
+  void clearOutput()
+  {
+    std::apply([](auto&...c)
+    {
+      (c.clear(),...);
+    },std::tie(nodes,executeList));
+  }
+  
+  Node* maybeActuallyInsertNode(Node::Shape&& shape,
+				const std::string& name="")
+  {
+    auto it=nodes.find(shape);
+    
+    if(it==nodes.end())
+      it=nodes.insert(std::make_unique<Node>(std::move(shape),name)).first;
+    else
+      if(const Node& n=*it->get();n.name!=name)
+	CRASH("node %s has already been given name \"%s\", cannot be renamed \"%s\"",n.describe().c_str(),n.name.c_str(),name.c_str());
+    
+    return it->get();
+  }
+  
+  Node* insertLine(const Line& line)
+  {
+    Node::Shape shape;
+    
+    std::visit(Overload{[this,
+			 &shape](const Extender& e)
+    {
+      shape.task=ExtendSelectingTPars{.pars=e.op.pars,.tSelect=e.op.tSelect};
+      
+      for(const auto& [w,l] : e.rhs)
+	shape.deps[insertLine(l)]+=w;
+    },
+	  [&shape](const Source& s)
+	  {
+	    shape.task=s;
+	  }},line.data);
+    
+    return maybeActuallyInsertNode(std::move(shape),line.name);
+  };
+  
+  Contracter& operator()(const std::string& name)
+  {
+    contracters.push_back(std::make_unique<Contracter>(name));
+    
+    return *contracters.back();
+  }
   
   void compile()
   {
-    std::unordered_set<std::unique_ptr<Node>,
-		       Node::Hasher,
-		       Node::Comparer> nodes;
-    
-    auto maybeActuallyInsertNode=
-      [&nodes](Node::Shape&& shape,
-	       const std::string& name="")
-      {
-    	auto it=nodes.find(shape);
-	
-	if(it==nodes.end())
-	  it=nodes.insert(std::make_unique<Node>(std::move(shape),name)).first;
-	
-	return it->get();
-      };
-    
-    auto insertLine=
-      [&maybeActuallyInsertNode](auto&& insertLine,
-				 const Line& line)->Node*
-      {
-	Node::Shape shape;
-	
-	std::visit(Overload{[&shape,
-			     &insertLine](const Extender& e)
-	{
-	  shape.op=e.pars;
-	  
-	  for(const auto& [w,l] : e.rhs)
-	    shape.deps[insertLine(insertLine,l)]+=w;
-	},
-	      [&shape](const Source& s)
-	      {
-		shape.op=s;
-	      }},line.data);
-	
-	return maybeActuallyInsertNode(std::move(shape),line.name);
-      };
+    clearOutput();
     
     /// Avoid inserting too many times
     std::map<Line,Node*> linesToNode;
     
-    for(const std::pair<Line,Line> &contr : traces)
-      {
-	std::array<const Line*,2> linesOfContr{&contr.first,&contr.second};
-	
-	Node::Shape contrShape{.op=pars};
-	for(int i=0;i<2;i++)
-	  {
-	    const Line& l=*linesOfContr[i];
-	    
-	    auto it=linesToNode.find(l);
-	    if(it==linesToNode.end())
-	      it=linesToNode.insert(std::pair{l,insertLine(insertLine,l)}).first;
-	    
-	    contrShape.deps[it->second]+=1.0;
-	  }
-	
-	maybeActuallyInsertNode(std::move(contrShape));
-    }
+    for(const std::unique_ptr<Contracter>& contracter : contracters)
+      for(const std::pair<Line,Line> &contr : contracter->traces)
+	{
+	  std::array<const Line*,2> linesOfContr{&contr.first,&contr.second};
+	  
+	  Node::Shape contrShape{.task=contracter->pars};
+	  for(int i=0;i<2;i++)
+	    {
+	      const Line& l=*linesOfContr[i];
+	      
+	      auto it=linesToNode.find(l);
+	      if(it==linesToNode.end())
+		it=linesToNode.insert(std::pair{l,insertLine(l)}).first;
+	      
+	      contrShape.deps[it->second]+=1.0;
+	    }
+	  
+	  maybeActuallyInsertNode(std::move(contrShape));
+	}
     
     // Label nodes
     for(int i=0;const std::unique_ptr<Node>& n : nodes)
@@ -1207,7 +1225,6 @@ struct Contracter
       }
     
     std::vector<Node*> readyNodes;
-    std::vector<Node*> executeList;
     
     for(const std::unique_ptr<Node>& n : nodes)
       if(n->shape.deps.empty())
@@ -1264,7 +1281,7 @@ struct Contracter
     int memoryPressure=0;
     
     auto freeWhatPossible=
-      [&nodes](const size_t& i)
+      [this](const size_t& i)
       {
 	std::vector<Node*> freeable;
 	for(const std::unique_ptr<Node>& maybeFreeable : nodes)
@@ -1276,18 +1293,22 @@ struct Contracter
 	  for(const Node* f : freeable)
 	    {
 	      cout<<" Free:("<<describe(*f)<<")"<<endl;
-	      if(std::holds_alternative<Pars>(f->shape.op))
+	      if(std::holds_alternative<ExtendSelectingTPars>(f->shape.task))
 		nReallyFreed++;
 	    }
 	
 	return nReallyFreed;
       };
     
+    int maxMemoryPressure{};
     for(size_t i=0;i<executeList.size();i++)
       {
 	const Node& n=*executeList[i];
-	if(std::holds_alternative<Pars>(n.shape.op))
-	   memoryPressure++;
+	if(std::holds_alternative<ExtendSelectingTPars>(n.shape.task))
+	  {
+	    memoryPressure++;
+	    maxMemoryPressure=std::max(maxMemoryPressure,memoryPressure);
+	  }
 	cout<<i<<" -- mp: "<<memoryPressure<<" -- "<<describe(n)<<endl;
 	
 	memoryPressure-=freeWhatPossible(i);
@@ -1295,6 +1316,7 @@ struct Contracter
     
     memoryPressure-=freeWhatPossible(executeList.size());
     cout<<"Final memory pressure: "<<memoryPressure<<endl;
+    cout<<"Maximal memory pressure: "<<maxMemoryPressure<<endl;
     
     cout<<"/////////////////////////////////////////////////////////////////"<<endl;
     
@@ -1306,47 +1328,43 @@ struct Contracter
 	{
 	  return "SOURCE"+std::to_string(iSource++);
 	},
-	      [&iOp](const Pars& pars)
+	      [&iOp](const ExtendSelectingTPars& pars)
 	      {
 		return "P"+std::to_string(iOp++);
 	      },
 	      [](const Contr& contr)
-		{
-		  return contr.name;
-		}},n->shape.op);
-	
+	      {
+		return contr.name;
+	      }},n->shape.task);
+  
     for(const Node* n : executeList)
-      {
-	if(const Pars* p=std::get_if<Pars>(&n->shape.op))
-	    std::visit([&n](const auto& par)
+      if(const ExtendSelectingTPars* e=std::get_if<ExtendSelectingTPars>(&n->shape.task))
+	std::visit([&n,
+		    &tSelect=e->tSelect](const auto& par)
+	{
+	  std::ostringstream os;
+	  
+	  os<<n->name<<" ";
+	  
+	  os<<std::remove_reference_t<decltype(par)>::tag<<" ";
+	  
+	  if(n->shape.deps.size()==1 and n->shape.deps.begin()->second==1.0)
+	    os<<n->shape.deps.begin()->first-> name<<" ";
+	  else
 	    {
-	      std::ostringstream os;
-	      
-	      os<<n->name<<" ";
-	      
-	      os<<std::remove_reference_t<decltype(par)>::tag<<" ";
-	      
-	      if(n->shape.deps.size()==1 and n->shape.deps.begin()->second==1.0)
-		os<<n->shape.deps.begin()->first-> name<<" ";
-	      else
-		{
-		  os<<"LINCOMB "<<n->shape.deps.size()<<" ";
-		  for(const auto& [d,w] : n->shape.deps)
-		    os<<d->name<<" "<<w<<" ";
-		}
-	      
-	      os<<par.emit();
-	      
-	      cout<<os.str()<<endl;
-	    },*p);
-      }
+	      os<<"LINCOMB "<<n->shape.deps.size()<<" ";
+	      for(const auto& [d,w] : n->shape.deps)
+		os<<d->name<<" "<<w<<" ";
+	    }
+	  
+	  os<<tSelect<<"   ";
+	  
+	  os<<par.emit();
+	  
+	  cout<<os.str()<<endl;
+	},e->pars);
   }
 };
-
-/* now, creates a new representation with nodes which seerves to
-   represent 3 kind of operation: creating a source, extending a line,
-   or contracting, creating all nodes in an arena implement the
-   topology and so on*/
 
 bool Extender::isCombiner() const
 {
@@ -1356,7 +1374,7 @@ bool Extender::isCombiner() const
 bool Extender::isScalar() const
 {
   const Gamma* g=
-    std::get_if<Gamma>(&pars);
+    std::get_if<Gamma>(&op.pars);
   
   return
     g!=nullptr and g->iGamma==0;
@@ -1378,17 +1396,19 @@ int main()
   const Phase phase2M{.mom=2*momM};
   
   Prop prop{.kappa=0.133,.mass=0.02,.r=1,.charge=0.0,.residue=1e-10};
-
-  Contracter dir("dir");
+  
+  Compiler compiler;
+  
+  Contracter& dir=compiler("dir");
   dir.addGammas(5,5);
   Line bw(phaseM*smeP*prop*smeP*phaseM*eta,"bw");
   Line fw(phaseP*smeM*prop*smeM*phaseP*eta,"fw");
   dir(bw,fw);
   
-  // Contracter tri("tri");
-  // tri.addGammas(1,5);
-  // for(size_t t=0;t<2;t++)
-  //   tri(prop*smeP*phaseM*eta,prop.dag()*smeP*phase2M*P5*smeM*Phase{.mom{0,0,(double)t}}*prop*smeM*phaseP*eta);
+  Contracter& tri=compiler("tri");
+  tri.addGammas(1,5);
+  for(size_t t=0;t<5;t++)
+    tri(prop*smeP*phaseM*eta,prop.dag()*smeP*phase2M*P5*smeM*DeltaT{.t=t}*prop*smeM*phaseP*eta);
   
   // Contracter box("box");
   // box.addGammas(1,5);
@@ -1423,7 +1443,7 @@ int main()
   // box.addGammas(5,5);
   // box(a,b);
   
-  dir.compile();
+  compiler.compile();
   
   return 0;
 }
