@@ -1,7 +1,9 @@
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdarg>
 #include <cstddef>
+#include <format>
 #include <limits>
 #include <map>
 #include <memory>
@@ -9,6 +11,7 @@
 #include <sstream>
 #include <iostream>
 #include <execinfo.h>
+#include <unordered_map>
 #include <unordered_set>
 #include <variant>
 #include <vector>
@@ -256,6 +259,12 @@ int registerOp()
   return i++;
 }
 
+#define PROVIDE_GETTER(NAME,COMMAND) \
+  std::string get ## NAME () const    \
+  {				     \
+    return COMMAND;		     \
+  }
+  
 template <typename D>
 struct BasePar
 {
@@ -266,6 +275,21 @@ struct BasePar
   {
     return *static_cast<const D*>(this);
   }
+  
+  PROVIDE_GETTER(Kappa,"");
+  
+  PROVIDE_GETTER(Mass,"");
+  
+  PROVIDE_GETTER(R,"");
+  
+  PROVIDE_GETTER(Charge,"");
+
+  std::string getMom(const size_t& i) const
+  {
+    return "";
+  }
+  
+  PROVIDE_GETTER(Residue,"");
   
   std::string describe() const
   {
@@ -335,10 +359,12 @@ struct Smear :
   Momentum mom{};
   
   PROVIDE_MEMBERS(Smear,SM,kappa,n,mom);
+  PROVIDE_GETTER(Kappa,std::format("{}",kappa));
+  PROVIDE_GETTER(R,std::format("{}",n));
   
-  std::string emit() const
+  std::string getMom(const size_t& i) const
   {
-    return (std::ostringstream()<<kappa<<"                      "<<n<<"              "<<mom[0]<<"     "<<mom[1]<<"     "<<mom[2]<<"              0").str();
+    return std::format("{}",mom[i]);
   }
   
   Smear dag() const
@@ -356,9 +382,9 @@ struct Phase :
   
   PROVIDE_MEMBERS(Phase,PH,mom);
   
-  std::string emit() const
+  std::string getMom(const size_t& i) const
   {
-    return (std::ostringstream()<<"                                               "<<mom[0]<<"     "<<mom[1]<<"     "<<mom[2]<<"              0").str();
+    return std::format("{}",mom[i]);
   }
   
   Phase dag() const
@@ -380,10 +406,7 @@ struct Gamma :
   
   PROVIDE_MEMBERS(Gamma,G,iGamma);
   
-  std::string emit() const
-  {
-    return (std::ostringstream()<<"                           "<<iGamma<<"   0                          0").str();
-  }
+  PROVIDE_GETTER(R,std::format("{}",iGamma));
   
   Gamma dag() const
   {
@@ -399,11 +422,6 @@ struct DeltaT :
   size_t t;
   
   PROVIDE_MEMBERS(DeltaT,S,t);
-  
-  std::string emit() const
-  {
-    return (std::ostringstream()<<"                                  0     0.0                                      0").str();
-  }
   
   DeltaT dag() const
   {
@@ -430,10 +448,20 @@ struct Prop :
   
   PROVIDE_MEMBERS(Prop,-,kappa,mass,r,charge,mom,residue)
   
-  std::string emit() const
+  PROVIDE_GETTER(Kappa,std::format("{}",kappa));
+  
+  PROVIDE_GETTER(Mass,std::format("{}",mass));
+  
+  PROVIDE_GETTER(R,std::format("{}",r));
+  
+  PROVIDE_GETTER(Charge,std::format("{}",charge));
+  
+  std::string getMom(const size_t& i) const
   {
-    return (std::ostringstream()<<kappa<<"     "<<mass<<"   "<<r<<"     "<<charge<<"     "<<mom[0]<<"     "<<mom[1]<<"     "<<mom[2]<<"       "<<residue<<"   0").str();
+    return std::format("{}",mom[i]);
   }
+  
+  PROVIDE_GETTER(Residue,std::format("{}",residue));
   
   Prop dag() const
   {
@@ -634,7 +662,7 @@ struct ExtendSelectingTPars
   {
     std::string res=::describe(pars);
     if(tSelect!=-1)
-      res+="deltaT("+std::to_string(tSelect)+")";
+      res+="deltaT("+std::format("{}",tSelect)+")";
     
     return res;
   }
@@ -952,6 +980,53 @@ struct Contr
   }
 };
 
+template <typename K,
+	  typename V>
+struct InsertionOrderedMap
+{
+  std::vector<std::pair<K,V>> values;
+  
+  std::map<K,size_t> index;
+  
+  size_t size() const
+  {
+    return values.size();
+  }
+  
+  size_t empty() const
+  {
+    return values.empty();
+  }
+  
+  auto begin() const
+  {
+    return values.begin();
+  }
+  
+  auto end() const
+  {
+    return values.end();
+  }
+  
+  V& operator[](const K& k)
+  {
+    const auto it=index.find(k);
+    
+    if(it==index.end())
+      {
+	const size_t pos=values.size();
+	values.emplace_back(std::pair{k,V{}});
+	index[k]=pos;
+	
+	return values.back().second;
+      }
+    else
+      return values[it->second].second;
+  }
+  
+  std::partial_ordering operator<=>(const InsertionOrderedMap&) const=default;
+};
+
 struct Node
 {
   template <typename T>
@@ -975,7 +1050,7 @@ struct Node
     
     Task task;
     
-    std::map<Node*,double> deps;
+    InsertionOrderedMap<Node*,double> deps;
     
     std::partial_ordering operator<=>(const Shape&) const=default;
     
@@ -984,7 +1059,7 @@ struct Node
       std::ostringstream os;
       
       os<<">>> "<<::describe(task);
-
+      
       if(deps.size())
 	{
 	  os<<" on (";
@@ -1060,6 +1135,22 @@ struct Node
   {
     return nScheduledDeps==shape.deps.size();
   }
+
+  std::string getSource() const
+  {
+    std::ostringstream os;
+    
+    if(shape.deps.size()==1 and shape.deps.begin()->second==1.0)
+      os<<shape.deps.begin()->first->name;
+    else
+      {
+	os<<"LINCOMB "<<shape.deps.size()<<" ";
+	for(const auto& [d,w] : shape.deps)
+	  os<<d->name<<" "<<w<<" ";
+      }
+    
+    return os.str();
+  }
   
   std::string describe() const
   {
@@ -1110,8 +1201,96 @@ struct Contracter
   }
 };
 
+struct PrintLiner
+{
+  std::vector<std::string> entries;
+  
+  size_t nColumns{};
+  
+  size_t nLines{};
+  
+  std::vector<std::vector<std::string>> commentsPerRow{{}};
+    
+  PrintLiner()
+  {
+    (*this)<<"Name"<<"Ins"<<"SourceName"<<"Tins"<<"Kappa"<<"Mass"<<"R"<<"Charge"<<"ThetaX"<<"ThetaY"<<"ThetaZ"<<"Residue"<<"Store";
+    newLine();
+  }
+  
+  size_t id(const size_t& iRow,
+	    const size_t& iCol) const
+  {
+    return iCol+nColumns*iRow;
+  }
+  
+  void newLine()
+  {
+    nLines++;
+    commentsPerRow.emplace_back();
+    
+    if(nColumns==0)
+      nColumns=entries.size();
+    else
+      if(entries.size()!=nColumns*nLines)
+	CRASH("total entries number %zu is not equal to the product of the number of lines %zu and columns %zu",entries.size(),nLines,nColumns);
+  }
+  
+  template <typename T>
+  PrintLiner& operator<<(const T& t)
+  {
+    entries.push_back((std::ostringstream()<<t).str());
+    
+    return *this;
+  }
+  
+  void normalize()
+  {
+    std::vector<size_t> maxLen(nColumns);
+    for(size_t iCol=0;iCol<nColumns;iCol++)
+      {
+	size_t m{};
+	for(size_t iRow=0;iRow<nLines;iRow++)
+	  m=std::max(m,entries[id(iRow,iCol)].length());
+	
+	for(size_t iRow=0;iRow<nLines;iRow++)
+	  for(size_t i=entries[id(iRow,iCol)].length();i<=m;i++)
+	    entries[id(iRow,iCol)]+=" ";
+      }
+  }
+  
+  void comment(const std::string& comment)
+  {
+    commentsPerRow.back().push_back(comment);
+  }
+  
+  void print() const
+  {
+    cout<<"NProps "<<nLines<<"\n"<<endl;
+    
+    for(size_t iRow=0;iRow<=nLines;iRow++)
+      {
+	if(const std::vector<std::string>& comments=commentsPerRow[iRow];comments.size())
+	  for(const std::string& comment : comments)
+	    cout<<"/* "<<comment<<"*/"<<endl;
+	
+	if(iRow<nLines)
+	  {
+	    for(size_t iCol=0;iCol<nColumns;iCol++)
+	      cout<<entries[id(iRow,iCol)]<<" ";
+	    cout<<endl;
+	  }
+      }
+    
+    cout<<commentsPerRow.size()<<endl;
+  }
+};
+
 struct Compiler
 {
+  bool debugFree{};
+  
+  bool debugContr{};
+  
   std::vector<std::unique_ptr<Contracter>> contracters;
   
   std::unordered_set<std::unique_ptr<Node>,
@@ -1135,8 +1314,12 @@ struct Compiler
     
     if(it==nodes.end())
       it=nodes.insert(std::make_unique<Node>(std::move(shape),name)).first;
+    
+    Node& n=*it->get();
+    if(n.name.empty() and not name.empty()) // might be intermediate passage
+      n.name=name;
     else
-      if(const Node& n=*it->get();n.name!=name)
+      if(n.name!=name)
 	CRASH("node %s has already been given name \"%s\", cannot be renamed \"%s\"",n.describe().c_str(),n.name.c_str(),name.c_str());
     
     return it->get();
@@ -1180,7 +1363,7 @@ struct Compiler
       for(const std::pair<Line,Line> &contr : contracter->traces)
 	{
 	  std::array<const Line*,2> linesOfContr{&contr.first,&contr.second};
-	  
+	    
 	  Node::Shape contrShape{.task=contracter->pars};
 	  for(int i=0;i<2;i++)
 	    {
@@ -1202,7 +1385,7 @@ struct Compiler
     
     // Add users
     for(auto& n : nodes)
-      for(auto [d,w] : n->shape.deps)
+      for(auto& [d,w] : n->shape.deps)
 	  d->users.push_back(&*n);
     
     // Reset the remaining user and scheduled deps
@@ -1219,9 +1402,6 @@ struct Compiler
       {
 	cout<<describe(*n)<<endl;
 	cout<<" used by "<<n->users.size()<<endl;
-	// 	cout<<" users:"<<endl;
-    // 	for(const Node* u : n->users)
-    // 	  cout<<"  "<<describe(*u)<<endl;
       }
     
     std::vector<Node*> readyNodes;
@@ -1326,43 +1506,95 @@ struct Compiler
       if(n->name.empty())
 	n->name=std::visit(Overload{[&iSource](const Source& source)
 	{
-	  return "SOURCE"+std::to_string(iSource++);
+	  return "SOURCE"+std::format("{}",iSource++);
 	},
 	      [&iOp](const ExtendSelectingTPars& pars)
 	      {
-		return "P"+std::to_string(iOp++);
+		return "P"+std::format("{}",iOp++);
 	      },
 	      [](const Contr& contr)
 	      {
 		return contr.name;
 	      }},n->shape.task);
+  }
   
+  void printSources() const
+  {
     for(const Node* n : executeList)
-      if(const ExtendSelectingTPars* e=std::get_if<ExtendSelectingTPars>(&n->shape.task))
-	std::visit([&n,
-		    &tSelect=e->tSelect](const auto& par)
-	{
-	  std::ostringstream os;
-	  
-	  os<<n->name<<" ";
-	  
-	  os<<std::remove_reference_t<decltype(par)>::tag<<" ";
-	  
-	  if(n->shape.deps.size()==1 and n->shape.deps.begin()->second==1.0)
-	    os<<n->shape.deps.begin()->first-> name<<" ";
-	  else
+      if(const Source* s=std::get_if<Source>(&n->shape.task))
+	cout<<s->emit(n->name)<<endl;
+  }
+  
+  void printLines() const
+  {
+    PrintLiner table;
+    
+    const auto includeCommentsOnFree=
+      [&table,
+       this](const size_t& i)
+      {
+	for(const std::unique_ptr<Node>& maybeFreeable : nodes)
+	  if(i and maybeFreeable->lastUse==i)
+	    table.comment("free "+maybeFreeable->name);
+      };
+    
+    for(size_t i=0;i<executeList.size();i++)
+      {
+	const Node* n=executeList[i];
+	
+	if(const ExtendSelectingTPars* e=std::get_if<ExtendSelectingTPars>(&n->shape.task))
+	  std::visit([&n,
+		      &table,
+		      &tSelect=e->tSelect](const auto& par)
+	  {
+	    table<<n->name;
+	    
+	    table<<std::remove_reference_t<decltype(par)>::tag;
+	    
+	    table<<n->getSource();
+	    
+	    table<<tSelect;
+	    
+	    table<<par.getKappa()<<par.getMass()<<par.getR()<<par.getCharge();
+	    for(size_t i=0;i<3;i++)
+	      table<<par.getMom(i);
+	    
+	    table<<par.getResidue();
+	    
+	    table<<"0";
+	    
+	    table.newLine();
+	  },e->pars);
+	
+	if(debugContr)
+	  if(const Contr* c=std::get_if<Contr>(&n->shape.task))
 	    {
-	      os<<"LINCOMB "<<n->shape.deps.size()<<" ";
+	      std::vector<std::string*> memb;
 	      for(const auto& [d,w] : n->shape.deps)
-		os<<d->name<<" "<<w<<" ";
+		memb.push_back(&d->name);
+	      
+	      if(memb.size()!=2)
+		CRASH("contraction with %zu members, different from 2",memb.size());
+	      
+	      table.comment(std::format("{} <- Contr({},{})",c->name,*memb[0],*memb[1]));
 	    }
-	  
-	  os<<tSelect<<"   ";
-	  
-	  os<<par.emit();
-	  
-	  cout<<os.str()<<endl;
-	},e->pars);
+	
+	if(debugFree)
+	  includeCommentsOnFree(i);
+      }
+    
+    if(debugFree)
+      includeCommentsOnFree(executeList.size());
+    
+    table.normalize();
+    
+    table.print();
+  }
+  
+  void printContr() const
+  {
+    for(const std::unique_ptr<Contracter>& c : contracters)
+      cout<<c->pars.name<<endl;
   }
 };
 
@@ -1408,42 +1640,22 @@ int main()
   Contracter& tri=compiler("tri");
   tri.addGammas(1,5);
   for(size_t t=0;t<5;t++)
-    tri(prop*smeP*phaseM*eta,prop.dag()*smeP*phase2M*P5*smeM*DeltaT{.t=t}*prop*smeM*phaseP*eta);
+    tri(Line(prop*smeP*phaseM*eta,"bw2"),
+	Line(prop.dag()*smeP*phase2M*P5*smeM*DeltaT{.t=t}*prop*smeM*phaseP*eta,std::format("fw2_{}",t)));
   
   // Contracter box("box");
   // box.addGammas(1,5);
   // for(size_t t=0;t<2;t++)
   //   tri(prop*smeP*phaseM*eta,prop.dag()*smeP*phase2M*P5*smeM*Phase{.mom{0,0,(double)t}}*prop*smeM*phaseP*eta);
   
-  // const Oper op1=prop*sme*deltaT*phase*sme;
-  // const Oper op2=phase*sme*sme;
-  
-  // std::vector<Oper> operations{op1,op2};
-
-  // Line a=op2*(op1*eta+eta);
-  // Line b=op2*eta;
-  
-  // const Oper* o=&op1;
-  // while(o)
-  //   {
-  //     cout<<describe(o->pars)<<endl;
-  //     o=&*o->rhs;
-  //   }
-  
-  
-  // cout<<describe(a)<<endl;
-  
-  
-  // Smear sme1{.kappa=0.1};
-  // Pars s{sme1};
-  // cout<<sme1.hash()<<endl;
-  // cout<<std::hash<Pars>{}(s)<<endl;
-  
-  // Contracter box("box");
-  // box.addGammas(5,5);
-  // box(a,b);
-  
   compiler.compile();
+  
+  compiler.printSources();
+  
+  compiler.debugContr=true;
+  compiler.printLines();
+  
+  compiler.printContr();
   
   return 0;
 }
