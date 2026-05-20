@@ -157,6 +157,41 @@ inline void internal_crash(const int& line,
   exit(1);
 }
 
+struct BitSet
+{
+  size_t size;
+  
+  std::vector<uint64_t> data;
+  
+  void resize(const size_t& size)
+  {
+    this->size=size;
+    data.resize((size+63)/64);
+  }
+  
+  void set(const size_t& i)
+  {
+    data[i/64]|=
+      (uint64_t(1)<<(i%64));
+  }
+  
+  void orWith(const BitSet& other)
+  {
+    for(size_t i=0;i<data.size();i++)
+      data[i]|=other.data[i];
+  }
+  
+  size_t popCount() const
+  {
+    size_t c=0;
+    
+    for(const uint64_t& w : data)
+      c+=std::popcount(w);
+    
+    return c;
+  }
+};
+
 inline std::vector<std::string> breakStringAt(const char* str,
 					      const char& d)
 {
@@ -578,6 +613,16 @@ struct Oper
   {
   }
   
+  std::string describe() const
+  {
+    std::string res=::describe(pars);
+    
+    if(rhs)
+      res+="*"+rhs->describe();
+    
+    return res;
+  }
+  
   constexpr bool operator==(const Oper& other) const
   {
     return pars==other.pars and
@@ -624,7 +669,7 @@ struct Source :
   
   size_t count;
   
-  int tSelect{0};
+  int tSelect;
   
   PROVIDE_MEMBERS(Source,SO,count,tSelect);
   
@@ -633,9 +678,10 @@ struct Source :
     return hashTuple(std::tie(count));
   }
   
-  Source()
+  Source(const int tSelect=-1) :
+    count{glbCount++},
+    tSelect(tSelect)
   {
-    count=glbCount++;
   }
   
   constexpr std::partial_ordering operator<=>(const Source&) const=default;
@@ -935,10 +981,12 @@ inline Line operator*(const Line& line,
   return c*line;
 }
 
+inline bool doNotMergeLinComb{};
+
 inline Line operator+(const Line& a,
-	       const Line& b)
+		      const Line& b)
 {
-  if(const Extender *ae=std::get_if<Extender>(&a.data),*be=std::get_if<Extender>(&b.data);ae and be and ae->op==be->op)
+  if(const Extender *ae=std::get_if<Extender>(&a.data),*be=std::get_if<Extender>(&b.data);ae and be and ae->op==be->op and not doNotMergeLinComb)
     {
       Extender res=*ae;
       
@@ -1118,6 +1166,27 @@ struct Node
   
   size_t nRemainingUsers;
   
+  BitSet isReachable;
+  
+  size_t nReachable{};
+  
+  void computeNReachable(const size_t& n)
+  {
+    if(not nReachable)
+      {
+	isReachable.resize(n);
+	isReachable.set(id);
+	
+	for(Node* user : users)
+	  {
+	    user->computeNReachable(n);
+	    isReachable.orWith(user->isReachable);
+	  }
+	
+	nReachable=isReachable.popCount();
+      }
+  }
+  
   size_t nScheduledDeps;
   
   size_t lastUse;
@@ -1157,7 +1226,7 @@ struct Node
     return os.str();
   }
   
-  int nFreedIfRun() const
+  int nFreedIfScheduled() const
   {
     int nFreed=0;
     for(const auto& [d,w] : shape.deps)
@@ -1167,9 +1236,21 @@ struct Node
     return nFreed;
   }
   
+  int nReachableReleasedIfScheduled() const
+  {
+    BitSet b;
+    b.resize(isReachable.size);
+    
+    for(const auto& [d,w] : shape.deps)
+      if(d->nRemainingUsers==1)
+	b.orWith(d->isReachable);
+    
+    return b.popCount();
+  }
+  
   std::pair<int,int> readyness() const
   {
-    return {nFreedIfRun(),-nRemainingUsers};
+    return {nReachableReleasedIfScheduled(),nReachable};
   }
 };
 
@@ -1193,7 +1274,8 @@ struct Contracter
   void tr(const Line& bw,
 	  const Line& fw)
   {
-    traces.emplace(bw,fw);
+    if(not traces.emplace(bw,fw).second)
+      CRASH("inserting tr(%s,%s), trace already existing",bw.name.c_str(),fw.name.c_str());
   }
 };
 
@@ -1353,7 +1435,7 @@ struct Run
       for(const std::pair<Line,Line> &contr : contracter->traces)
 	{
 	  std::array<const Line*,2> linesOfContr{&contr.first,&contr.second};
-	    
+	  
 	  Node::Shape contrShape{.task=contracter->pars};
 	  for(int i=0;i<2;i++)
 	    {
@@ -1361,7 +1443,13 @@ struct Run
 	      
 	      auto it=linesToNode.find(l);
 	      if(it==linesToNode.end())
-		it=linesToNode.insert(std::pair{l,insertLine(l)}).first;
+		{
+		  for(const auto& e : linesToNode)
+		    if(e.first.name==l.name)
+		      CRASH("Trying to insert with name \"%s\" a line %s but it is already associated to %s",e.first.name.c_str(),l.describe().c_str(),e.first.describe().c_str());
+		  
+		  it=linesToNode.insert(std::pair{l,insertLine(l)}).first;
+		}
 	      
 	      contrShape.deps[it->second]+=1.0;
 	    }
@@ -1377,6 +1465,10 @@ struct Run
     for(auto& n : nodes)
       for(auto& [d,w] : n->shape.deps)
 	  d->users.push_back(&*n);
+    
+    // Set isReachable
+    for(const std::unique_ptr<Node>& n : nodes)
+      n->computeNReachable(nodes.size());
     
     // Reset the remaining user and scheduled deps
     for(auto& n : nodes)
@@ -1412,12 +1504,14 @@ struct Run
 	
 	cout<<"Ready nodes:"<<endl;
 	for(const Node* n : readyNodes)
-	  cout<<describe(*n)<<" nFreed if run: "<<n->nFreedIfRun()<<endl;
+	  cout<<describe(*n)<<" nFreed if run: "<<n->nFreedIfScheduled()<<", n remaining users: "<<n->nRemainingUsers<<" nReachable: "<<n->nReachable<<" nReachableReleasedIfScheduled: "<<n->nReachableReleasedIfScheduled()<<endl;
 	
 	Node* toBeRun=readyNodes.back();
 	readyNodes.pop_back();
 	if(readyNodes.empty())
 	  cout<<"Chosen the only possible node"<<endl;
+	else
+	  cout<<"Chosen: "<<describe(*toBeRun)<<endl;
 	
 	executeList.push_back(toBeRun);
 	
