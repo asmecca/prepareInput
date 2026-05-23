@@ -257,7 +257,16 @@ inline std::ostream& operator<<(std::ostream& os,
 /// Negate a momentum
 inline Momentum operator-(const Momentum& y)
 {
-  return {-y[0],-y[1],-y[2]};
+  auto minus=
+    [](const double& x)
+    {
+      if(x)
+	return -x;
+      else
+	return x;
+    };
+  
+  return {minus(y[0]),minus(y[1]),minus(y[2])};
 }
 
 /// Product of a scalar with a momentum
@@ -488,7 +497,7 @@ struct Prop :
   
   PROVIDE_GETTER(Mass,std::format("{}",mass));
   
-  PROVIDE_GETTER(R,std::format("{}",r));
+  PROVIDE_GETTER(R,std::format("{}",(r==-1)?0:1));
   
   PROVIDE_GETTER(Charge,std::format("{}",charge));
   
@@ -507,7 +516,7 @@ struct Prop :
     
     res.mom=-mom;
     
-    return *this;
+    return res;
   }
   
   constexpr std::partial_ordering operator<=>(const Prop&) const=default;
@@ -1226,6 +1235,11 @@ struct Node
     return os.str();
   }
   
+  int memoryCostIfRun() const
+  {
+    return std::visit(Overload{[](const Source&){return 1;},[](const ExtendSelectingTPars&){return 1;},[](const Contr&){return 0;}},shape.task);
+  }
+  
   int nFreedIfScheduled() const
   {
     int nFreed=0;
@@ -1248,9 +1262,9 @@ struct Node
     return b.popCount();
   }
   
-  std::pair<int,int> readyness() const
+  std::array<int,3> readyness() const
   {
-    return {nReachableReleasedIfScheduled(),nReachable};
+    return {nReachableReleasedIfScheduled(),-memoryCostIfRun(),(int)nReachable};
   }
 };
 
@@ -1391,7 +1405,7 @@ struct Run
     if(n.name.empty() and not name.empty()) // might be intermediate passage
       n.name=name;
     else
-      if(n.name!=name)
+      if((not name.empty()) and n.name!=name)
 	CRASH("node %s has already been given name \"%s\", cannot be renamed \"%s\"",n.describe().c_str(),n.name.c_str(),name.c_str());
     
     return it->get();
@@ -1686,10 +1700,12 @@ struct Run
 	      for(const auto& [d,w] : n->shape.deps)
 		memb.push_back(&d->name);
 	      
+	      size_t i[2]={0,1};
 	      if(memb.size()!=2)
-		CRASH("contraction with %zu members, different from 2",memb.size());
+		i[1]=0;
+	      ///CRASH("contraction with %zu members, different from 2",memb.size());
 	      
-	      table.comment(std::format("{} <- Contr({},{})",c->name,*memb[0],*memb[1]));
+	      table.comment(std::format("{} <- Contr({},{})",c->name,*memb[i[0]],*memb[i[1]]));
 	    }
 	
 	if(debugFree)
