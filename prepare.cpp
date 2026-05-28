@@ -12,7 +12,7 @@ const Phase phase2P{.mom=2*momP};
 
 const Prop prop{.kappa=0.1394267,.mass=0.00066690,.r=1,.charge=0.0,.residue=1e-20};
 
-void tri()
+void dir()
 {
   const Source eta(0);
   
@@ -24,6 +24,84 @@ void tri()
   Line bw(phaseM*smeP*prop*smeP*phaseM*eta,"bw");
   Line fw(phaseP*smeM*prop*smeM*phaseP*eta,"fw");
   dir.tr(bw,fw);
+  
+  run.compile();
+  
+  cout<<run.printSources()<<endl;
+  
+  run.debugFree=true;
+  run.debugContr=true;
+  cout<<run.printLines()<<endl;
+  
+  cout<<run.printContr()<<endl;
+}
+
+void dir2()
+{
+  const Source eta(0);
+  
+  Run run;
+  
+  const Oper O=smeM*phase2P*P5*smeP;
+  
+  Line bw(prop*eta,"bw");
+  Line fw1(O*prop*O.dag()*eta,"fw1");
+  Line fw2(O.dag()*prop*O.dag()*eta,"fw2");
+  
+  Contracter& dir=run.getTracer("dir");
+  dir.addGammas(0,0);
+  dir.tr(bw,fw1);
+  dir.tr(bw,fw2);
+  dir.tr(bw,bw);
+  
+  run.compile();
+  
+  cout<<run.printSources()<<endl;
+  
+  run.debugFree=true;
+  run.debugContr=true;
+  cout<<run.printLines()<<endl;
+  
+  cout<<run.printContr()<<endl;
+}
+
+void dir3()
+{
+  const Source eta(0);
+  
+  Run run;
+  
+  const Oper OP=smeM*phaseP;
+  const Oper OM=smeP*phaseM;
+  
+  Line bw1(OM.dag()*prop*OM*eta,"bw1");
+  Line bw2(OP.dag()*prop*OM*eta,"bw2");
+  Line fw1(OP.dag()*prop*OP*eta,"fw1");
+  Line fw2(OM.dag()*prop*OP*eta,"fw2");
+  
+  Contracter& dir=run.getTracer("dir");
+  dir.addGammas(5,5);
+  dir.tr(bw1,fw1);
+  dir.tr(bw2,fw2);
+  dir.tr(bw1,bw1);
+  dir.tr(fw1,fw1);
+  
+  run.compile();
+  
+  cout<<run.printSources()<<endl;
+  
+  run.debugFree=true;
+  run.debugContr=true;
+  cout<<run.printLines()<<endl;
+  
+  cout<<run.printContr()<<endl;
+}
+
+void tri()
+{
+  const Source eta(0);
+  
+  Run run;
   
   Contracter& tri=run.getTracer("tri");
   tri.addGammas(1,5);
@@ -37,6 +115,21 @@ void tri()
   
   run.debugContr=true;
   cout<<run.printLines()<<endl;
+  
+  cout<<run.printContr()<<endl;
+}
+
+void print(Run &run)
+{
+  run.compile();
+  
+  cout<<run.printSources()<<endl;
+  
+  cout<<run.printLines()<<endl;
+  
+  // cout<<describe(OP)<<endl;
+  // cout<<describe(OM)<<endl;
+  
   
   cout<<run.printContr()<<endl;
 }
@@ -60,7 +153,7 @@ void box()
   auto getBw=
     [&](const size_t t)
     {
-      return OM*DeltaT{.t=t}*prop*OP*DeltaT{.t=t}*prop*eta;
+      return OM*DeltaT{.t=t}*prop*OP*DeltaT{.t=t}*prop.dag()*eta;
     };
   
   /// Gets the original line
@@ -76,20 +169,156 @@ void box()
   boxA.tr(Line(bw,"bw"),
 	  Line(fwA,"fwA"));
   
+  boxA.addGammas(0,0);
+  
   boxB.tr(Line(bw,"bw"),
 	  Line(fwB,"fwB"));
   
-  runBox.compile();
+  boxB.addGammas(0,0);
+ 
+  auto& boxC=runBox.getTracer("boxC");
+  boxC.tr(Line(eta,"So"),
+	  Line(prop*DeltaT{.t=10}*OP.dag()*prop.dag()*DeltaT{.t=10}*OM.dag()*prop*OM*DeltaT{.t=0}*prop.dag()*OP*eta,"piece"));
+  boxC.addGammas(0,0);
   
-  cout<<runBox.printLines()<<endl;
+  print(runBox);
+}
+
+void comboA()
+{
+  Source u(0);
+  Source d(5);
   
-  cout<<describe(OP)<<endl;
-  cout<<describe(OM)<<endl;
+  const Oper OP=P5;
+  
+  Run runCombo;
+  
+  auto& combo=runCombo.getTracer("Op");
+  combo.addGammas(0,0);
+  combo.tr(Line(u,"u"),
+	   Line(OP*prop*d,"Op_d"));
+  combo.tr(Line(d,"d"),
+	   Line(OP.dag()*prop.dag()*u,"Op_u"));
+  
+  auto& base=runCombo.getTracer("Base");
+  base.addGammas(5,5);
+  base.tr(Line(prop*d,"straight_d"),
+	  Line(prop*d,"straight_d"));
+  
+  print(runCombo);
+}
+
+void comboB()
+{
+  Source u(0);
+  Source d(5);
+  
+  // const Phase phase0P{.mom={0,0,0}};
+  const Oper OP=phase2P*P5;
+  
+  Run runCombo;
+  
+  auto& combo=runCombo.getTracer("Op");
+  combo.addGammas(0,0);
+  combo.tr(Line(d,"d"),
+	   Line(OP*prop*u,"Op_prop_u"));
+  combo.tr(Line(u,"u"),
+	   Line(OP.dag()*prop.dag()*d,"Opdag_propdag_d"));
+  
+  auto& base=runCombo.getTracer("Base");
+  base.addGammas(0,0);
+  base.tr(Line(OP*prop*d,"Op_prop_d"),
+	  Line(prop*OP*d,"prop_OP_d"));
+  
+  print(runCombo);
+}
+
+void localBox()
+{
+  using Entry=
+    std::tuple<const char*,Momentum>;
+  
+  std::vector<std::vector<Entry>> a{{std::tuple
+				     {"PZ",Momentum{0,0,2}},
+				     {"MZ",{0,0,-2}}},
+				    {{"0P11",{0,2,2}},
+				     {"0M11",{0,-2,-2}}},
+				    {{"P111",{2,2,2}},
+				     {"M111",{-2,-2,-2}}},
+				    {{"PZ2",{0,0,4}},
+				     {"MZ2",{0,0,-4}}},
+				    {{"P012",{0,2,4}},
+				     {"M012",{0,-2,-4}}}};
+  
+  const Source eta(0);
+  const Prop prop{.kappa=0.1394267,.mass=0.00066690,.r=0,.charge=0.0,.residue=1e-20};
+  
+  Run run;
+  
+  auto& box=run.getTracer("box");
+  box.addGammas(5,5);
+  
+  auto& tri=run.getTracer("tri");
+  for(int ig=1;ig<=3;ig++)
+    tri.addGammas(ig,5);
+  
+  auto& triNaz=run.getTracer("triNaz");
+  for(int ig=1;ig<=3;ig++)
+    triNaz.addGammas(ig,5);
+  
+  doNotMergeLinComb=true;
+  
+  for(int iSo=0;iSo<5;iSo++)
+    for(int iRotSo=0;const auto& [nSo,momSo] : a[iSo])
+      {
+	Phase phSo{.mom=momSo};
+	const Line bwLine(prop.dag()*phSo.dag()*P5*DeltaT{.t=0}*prop*phSo*eta,std::format("bw{}",nSo));
+	
+	tri.tr(bwLine,
+	       Line(prop*eta,"-"));
+	
+	for(int iSi=0;iSi<5;iSi++)
+	  {
+	    Phase phSi{.mom=std::get<Momentum>(a[iSi].front())};
+	    auto getT=
+	      [&prop,
+	       &eta,
+	       &phSi](const size_t t)
+	      {
+		return prop.dag()*DeltaT{.t=t}*phSi*P5*prop*eta;
+	      };
+	    
+	    const size_t t0=5;
+	    if(iSo==0 and iRotSo==0)
+	      for(size_t t=t0;t<25;t++)
+		triNaz.tr(Line(prop*phSi*eta,std::format("nazBwSi{}",iSi)), ///Correct, even if on so
+			  Line(getT(t),std::format("nazFwT{}Si{}",t,iSi)));
+	    
+	    Line cumul=DeltaT{.t=t0}*getT(t0);
+	    for(size_t t=t0+1;t<25;t++)
+	      cumul=cumul+DeltaT{.t=t}*getT(t);
+	    
+	    box.tr(bwLine,
+		   Line(phSi.dag()*cumul,std::format("fwP{}",iSi)));
+	  }
+	
+	iRotSo++;
+      }
+  
+  run.compile();
+  
+  print(run);
 }
 
 int main()
 {
-  box();
+  // comboA();
+  // comboB();
+  
+  localBox();
+  
+  //box();
+  //dir3();
   
   return 0;
 }
