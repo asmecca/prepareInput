@@ -1107,6 +1107,8 @@ struct Node
     
     std::partial_ordering operator<=>(const Shape&) const=default;
     
+    bool operator==(const Shape&) const=default;
+    
     std::string describe() const
     {
       std::ostringstream os;
