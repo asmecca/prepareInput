@@ -237,6 +237,13 @@ struct std::hash<std::array<T,N>>
 struct Momentum :
   std::array<double,3>
 {
+   Momentum operator/(const double d) const
+  {
+    Momentum res;
+    for(int i=0;i<3;i++)
+      res[i]=(*this)[i]/d;
+    return res;
+  }
 };
 
 template <>
