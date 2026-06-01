@@ -419,7 +419,11 @@ struct Smear :
   
   Smear dag() const
   {
-    return *this;
+    Smear res{*this};
+    
+    res.mom=-mom;
+
+    return res;
   }
   
   constexpr std::partial_ordering operator<=>(const Smear&) const=default;
