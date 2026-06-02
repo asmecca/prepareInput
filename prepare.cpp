@@ -356,6 +356,7 @@ void smeBox()
     triNaz.addGammas(ig,5);
   
   doNotMergeLinComb=true;
+  Smear sm0{.kappa=0.4,.n=80,.mom={0,0,0}};
   
   for(int iSo=0;iSo<5;iSo++)
     for(int iRotSo=0;const auto& [nSo,momSo] : a[iSo])
@@ -365,7 +366,7 @@ void smeBox()
 	const Line bwLine(prop*smSo*phSo.dag()*smSo.dag()*P5*DeltaT{.t=0}*prop.dag()*smSo.dag()*phSo*smSo*eta,std::format("bw{}",nSo));
 	
 	tri.tr(bwLine,
-	       Line(prop.dag()*eta,"-"));
+	       Line(sm0*sm0*prop.dag()*eta,"sm_prop"));
 	
 	for(int iSi=0;iSi<5;iSi++)
 	  {
