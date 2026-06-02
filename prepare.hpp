@@ -512,6 +512,9 @@ struct Prop :
   
   Prop dag() const
   {
+    if(r!=-1 and r!=1)
+      CRASH("Impossible value for r, %d",r);
+    
     Prop res=*this;
     
     res.r=-r;
