@@ -251,7 +251,7 @@ void localBox()
 				     {"M012",{0,-2,-4}}}};
   
   const Source eta(0);
-  const Prop prop{.kappa=0.1394267,.mass=0.00066690,.r=0,.charge=0.0,.residue=1e-20};
+  const Prop prop{.kappa=0.1394267,.mass=0.00066690,.r=1,.charge=0.0,.residue=1e-20};
   
   Run run;
   

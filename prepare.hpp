@@ -19,6 +19,8 @@ using std::cout;
 using std::cerr;
 using std::endl;
 
+inline bool debugPrepare{};
+
 inline size_t hashCombine(const size_t& h,
 		   const size_t& x)
 {
@@ -326,7 +328,7 @@ struct BasePar
   PROVIDE_GETTER(R,"");
   
   PROVIDE_GETTER(Charge,"");
-
+  
   std::string getMom(const size_t& i) const
   {
     return "";
@@ -1495,11 +1497,14 @@ struct Run
       }
     
     // report
-    cout<<"==========="<<endl;
-    for(const auto& n : nodes)
+    if(debugPrepare)
       {
-	cout<<describe(*n)<<endl;
-	cout<<" used by "<<n->users.size()<<endl;
+	cout<<"==========="<<endl;
+	for(const auto& n : nodes)
+	  {
+	    cout<<describe(*n)<<endl;
+	    cout<<" used by "<<n->users.size()<<endl;
+	  }
       }
     
     std::vector<Node*> readyNodes;
@@ -1518,16 +1523,23 @@ struct Run
 		    return a->readyness()<b->readyness();
 		  });
 	
-	cout<<"Ready nodes:"<<endl;
-	for(const Node* n : readyNodes)
-	  cout<<describe(*n)<<" nFreed if run: "<<n->nFreedIfScheduled()<<", n remaining users: "<<n->nRemainingUsers<<" nReachable: "<<n->nReachable<<" nReachableReleasedIfScheduled: "<<n->nReachableReleasedIfScheduled()<<endl;
+	if(debugPrepare)
+	  {
+	    cout<<"Ready nodes:"<<endl;
+	    for(const Node* n : readyNodes)
+	      cout<<describe(*n)<<" nFreed if run: "<<n->nFreedIfScheduled()<<", n remaining users: "<<n->nRemainingUsers<<" nReachable: "<<n->nReachable<<" nReachableReleasedIfScheduled: "<<n->nReachableReleasedIfScheduled()<<endl;
+	  }
 	
 	Node* toBeRun=readyNodes.back();
 	readyNodes.pop_back();
-	if(readyNodes.empty())
-	  cout<<"Chosen the only possible node"<<endl;
-	else
-	  cout<<"Chosen: "<<describe(*toBeRun)<<endl;
+	
+	if(debugPrepare)
+	  {
+	    if(readyNodes.empty())
+	      cout<<"Chosen the only possible node"<<endl;
+	    else
+	      cout<<"Chosen: "<<describe(*toBeRun)<<endl;
+	  }
 	
 	executeList.push_back(toBeRun);
 	
@@ -1536,7 +1548,8 @@ struct Run
 	    d->nRemainingUsers--;
 	    if(d->isFreeable())
 	      {
-		cout<<"Now "<<describe(*d)<<" is freeable at step "<<executeList.size()<<endl;
+		if(debugPrepare)
+		  cout<<"Now "<<describe(*d)<<" is freeable at step "<<executeList.size()<<endl;
 		d->lastUse=executeList.size()-1;
 	      }
 	  }
@@ -1547,7 +1560,8 @@ struct Run
 	    if(user->isReadyForSchedule())
 	      readyNodes.push_back(user);
 	  }
-	cout<<"-------"<<endl;
+	if(debugPrepare)
+	  cout<<"-------"<<endl;
       }
     
     // Check
@@ -1555,9 +1569,11 @@ struct Run
       if(not n->isReadyForSchedule())
 	CRASH("Node %s not scheduled",n->describe().c_str());
     
-    cout<<"/////////////////////////////////////////////////////////////////"<<endl;
+    if(debugPrepare)
+      cout<<"/////////////////////////////////////////////////////////////////"<<endl;
     
-    cout<<"Final schedule: "<<endl;
+    if(debugPrepare)
+      cout<<"Final schedule: "<<endl;
     int memoryPressure=0;
     
     auto freeWhatPossible=
@@ -1572,7 +1588,8 @@ struct Run
 	if(freeable.size())
 	  for(const Node* f : freeable)
 	    {
-	      cout<<" Free:("<<describe(*f)<<")"<<endl;
+	      if(debugPrepare)
+		cout<<" Free:("<<describe(*f)<<")"<<endl;
 	      if(std::holds_alternative<ExtendSelectingTPars>(f->shape.task))
 		nReallyFreed++;
 	    }
@@ -1589,7 +1606,8 @@ struct Run
 	    memoryPressure++;
 	    maxMemoryPressure=std::max(maxMemoryPressure,memoryPressure);
 	  }
-	cout<<i<<" -- mp: "<<memoryPressure<<" -- "<<describe(n)<<endl;
+	if(debugPrepare)
+	  cout<<i<<" -- mp: "<<memoryPressure<<" -- "<<describe(n)<<endl;
 	
 	memoryPressure-=freeWhatPossible(i);
       }
