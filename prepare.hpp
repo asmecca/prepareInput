@@ -949,7 +949,7 @@ inline size_t Line::maybeRemoveUselessScalar()
 	  Extender* nestedE=
 	    std::get_if<Extender>(&nestedRhs->data);
 	  
-	  if(nestedE->isScalar() and e->op.tSelect==-1)
+	  if(nestedE and nestedE->isScalar() and e->op.tSelect==-1)
 	    {
 	      e->op.tSelect=nestedE->op.tSelect;
 	      e->rhs=std::move(nestedE->rhs);
