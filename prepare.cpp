@@ -1,19 +1,25 @@
 #include "prepare.hpp"
 
-const Momentum momP{1,1,1};
-const Momentum momM=-momP;
 const Gamma P5{.iGamma=5};
-const Smear smeP{.kappa=0.4,.n=80,.mom=momP};
-const Smear smeM{.kappa=0.4,.n=80,.mom=momM};
-const Phase phaseP{.mom=momP};
-const Phase phaseM{.mom=momM};
-const Phase phase2M{.mom=2*momM};
-const Phase phase2P{.mom=2*momP};
 
-const Prop prop{.kappa=0.1394267,.mass=0.00066690,.r=1,.charge=0.0,.residue=1e-20};
+namespace tests
+{
+  const Momentum momP{1,1,1};
+  const Momentum momM=-momP;
+  const Smear smeP{.kappa=0.4,.n=80,.mom=momP};
+  const Smear smeM{.kappa=0.4,.n=80,.mom=momM};
+  const Phase phaseP{.mom=momP};
+  const Phase phaseM{.mom=momM};
+  const Phase phase2M{.mom=2*momM};
+  const Phase phase2P{.mom=2*momP};
+  
+  const Prop prop{.kappa=0.1394267,.mass=0.00066690,.r=1,.charge=0.0,.residue=1e-20};
+}
 
 void dir()
 {
+  using namespace tests;
+  
   const Source eta(0);
   
   Run run;
@@ -38,6 +44,8 @@ void dir()
 
 void dir2()
 {
+  using namespace tests;
+  
   const Source eta(0);
   
   Run run;
@@ -67,6 +75,8 @@ void dir2()
 
 void dir3()
 {
+  using namespace tests;
+  
   const Source eta(0);
   
   Run run;
@@ -99,6 +109,8 @@ void dir3()
 
 void tri()
 {
+  using namespace tests;
+  
   const Source eta(0);
   
   Run run;
@@ -121,7 +133,7 @@ void tri()
 
 void print(Run &run)
 {
-  run.compile();
+  // run.compile();
   
   cout<<run.printSources()<<endl;
   
@@ -134,8 +146,10 @@ void print(Run &run)
   cout<<run.printContr()<<endl;
 }
 
-void box()
+void testBox()
 {
+  using namespace tests;
+  
   Run runBox;
   
   /// Original source
@@ -186,6 +200,8 @@ void box()
 
 void comboA()
 {
+  using namespace tests;
+  
   Source u(0);
   Source d(5);
   
@@ -210,6 +226,8 @@ void comboA()
 
 void comboB()
 {
+  using namespace tests;
+  
   Source u(0);
   Source d(5);
   
@@ -352,8 +370,9 @@ void smeBox()
 				     {"M012",{0,-2,-4}}}};
   
   const Source eta(0);
-  const Prop prop{.kappa=0.1394267,.mass=0.00066690,.r=-1,.charge=0.0,.residue=1e-20};
-  
+  const Prop propSameTime{.kappa=0.1394267,.mass=0.00066690,.r=+1,.charge=0.0,.residue=1e-20};
+  const Prop propDiffTime{.kappa=0.1394267,.mass=0.00066690,.r=-1,.charge=0.0,.residue=1e-20};
+ 
   Run run;
   
   auto& box=run.getTracer("box");
@@ -368,35 +387,46 @@ void smeBox()
     triNaz.addGammas(ig,5);
   
   doNotMergeLinComb=true;
-  Smear sm0{.kappa=0.4,.n=80,.mom={0,0,0}};
+  
+  auto getOp=
+    [](const Momentum& mom)
+    {
+      const Phase phPi1{.mom=mom};
+      
+      const Smear smPi1q{.kappa=0.4,.n=80,.mom=mom/2.0};
+      const Smear smPi1qBar{.kappa=0.4,.n=80,.mom=-mom/2.0};
+      
+      return smPi1qBar*phPi1*smPi1q;
+    };
   
   for(int iSo=0;iSo<5;iSo++)
     for(int iRotSo=0;const auto& [nSo,momSo] : a[iSo])
-      {
-	Phase phSo{.mom=momSo};
-	Smear smSo{.kappa=0.4,.n=80,.mom=momSo/2.0};
-	const Line bwLine(prop.dag()*smSo*phSo.dag()*smSo.dag()*P5*DeltaT{.t=0}*prop*smSo.dag()*phSo*smSo*eta,std::format("bw{}",nSo));
+      if(iRotSo<2)
+	{
+	const Oper pi1=getOp(momSo);
+	const Oper pi2=pi1.dag();
+	const Line bwLine(propDiffTime.dag()*pi2*P5*DeltaT{.t=0}*propSameTime.dag()*pi1*eta,std::format("bw{}",nSo));
 	
 	tri.tr(bwLine,
-	       Line(sm0*sm0*prop*eta,"sm_prop"));
+	       Line(propDiffTime*eta,"sm_prop"));
 	
 	for(int iSi=0;iSi<5;iSi++)
 	  {
-	    Phase phSi{.mom=std::get<Momentum>(a[iSi].front())};
-	    Smear smSi{.kappa=0.4,.n=80,.mom=(std::get<Momentum>(a[iSi].front())/2.0)};
+	    const Oper pi3=getOp(std::get<Momentum>(a[iSi].front()));
+	    const Oper pi4=pi3.dag();
 	    auto getT=
-	      [&prop,
+	      [&propSameTime,
+	       &propDiffTime,
 	       &eta,
-	       &phSi,
-	       &smSi](const size_t t)
+	       &pi3](const size_t t)
 	      {
-		return prop.dag()*DeltaT{.t=t}*smSi.dag()*phSi*P5*smSi*prop*eta;
+		return propSameTime*DeltaT{.t=t}*pi3*P5*propDiffTime*eta;
 	      };
 	    
 	    const size_t t0=5;
 	    if(iSo==0 and iRotSo==0)
 	      for(size_t t=t0;t<25;t++)
-		triNaz.tr(Line(prop*smSi.dag()*phSi*smSi*eta,std::format("nazBwSi{}",iSi)), ///Correct, even if on so
+		triNaz.tr(Line(propDiffTime*pi3*eta,std::format("nazBwSi{}",iSi)), ///Correct, even if on so
 			  Line(getT(t),std::format("nazFwT{}Si{}",t,iSi)));
 	    
 	    Line cumul=DeltaT{.t=t0}*getT(t0);
@@ -404,7 +434,7 @@ void smeBox()
 	      cumul=cumul+DeltaT{.t=t}*getT(t);
 	    
 	    box.tr(bwLine,
-		   Line(smSi*phSi.dag()*smSi.dag()*cumul,std::format("fwP{}",iSi)));
+		   Line(pi4*cumul,std::format("fwP{}",iSi)));
 	  }
 	
 	iRotSo++;
@@ -412,6 +442,8 @@ void smeBox()
   
   run.compile();
   
+  // run.debugContr=true;
+  // run.debugFree=true;
   print(run);
 }
 
