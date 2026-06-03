@@ -242,16 +242,28 @@ void localBox()
 				     {"PZ",Momentum{0,0,2}},
 				     {"MZ",{0,0,-2}}},
 				    {{"0P11",{0,2,2}},
-				     {"0M11",{0,-2,-2}}},
+				     {"0M11",{0,-2,-2}},
+				     {"P101",{2,0,2}},
+				     {"M101",{-2,0,-2}},
+				     {"0M1P1",{0,-2,2}},
+				     {"0P1M1",{0,2,-2}},
+				     {"M10P1",{-2,0,2}},
+				     {"P10M1",{2,0,-2}}},
 				    {{"P111",{2,2,2}},
-				     {"M111",{-2,-2,-2}}},
+				     {"M111",{-2,-2,-2}},
+				     {"M1P11",{-2,2,2}},
+				     {"P1M11",{2,-2,-2}},
+				     {"P1M1P1",{2,-2,2}},
+				     {"M1P1M1",{-2,2,-2}},
+				     {"M11P1",{-2,-2,2}},
+				     {"P11M1",{2,2,-2}}},
 				    {{"PZ2",{0,0,4}},
 				     {"MZ2",{0,0,-4}}},
 				    {{"P012",{0,2,4}},
 				     {"M012",{0,-2,-4}}}};
   
   const Source eta(0);
-  const Prop prop{.kappa=0.1394267,.mass=0.00066690,.r=1,.charge=0.0,.residue=1e-20};
+  const Prop prop{.kappa=0.1394267,.mass=0.00066690,.r=-1,.charge=0.0,.residue=1e-20};
   
   Run run;
   
@@ -310,12 +322,106 @@ void localBox()
   print(run);
 }
 
+void smeBox()
+{
+  using Entry=
+    std::tuple<const char*,Momentum>;
+  
+  std::vector<std::vector<Entry>> a{{std::tuple
+				     {"PZ",Momentum{0,0,2}},
+				     {"MZ",{0,0,-2}}},
+				    {{"0P11",{0,2,2}},
+				     {"0M11",{0,-2,-2}},
+				     {"P101",{2,0,2}},
+				     {"M101",{-2,0,-2}},
+				     {"0M1P1",{0,-2,2}},
+				     {"0P1M1",{0,2,-2}},
+				     {"M10P1",{-2,0,2}},
+				     {"P10M1",{2,0,-2}}},
+				    {{"P111",{2,2,2}},
+				     {"M111",{-2,-2,-2}},
+				     {"M1P11",{-2,2,2}},
+				     {"P1M11",{2,-2,-2}},
+				     {"P1M1P1",{2,-2,2}},
+				     {"M1P1M1",{-2,2,-2}},
+				     {"M11P1",{-2,-2,2}},
+				     {"P11M1",{2,2,-2}}},
+				    {{"PZ2",{0,0,4}},
+				     {"MZ2",{0,0,-4}}},
+				    {{"P012",{0,2,4}},
+				     {"M012",{0,-2,-4}}}};
+  
+  const Source eta(0);
+  const Prop prop{.kappa=0.1394267,.mass=0.00066690,.r=-1,.charge=0.0,.residue=1e-20};
+  
+  Run run;
+  
+  auto& box=run.getTracer("box");
+  box.addGammas(5,5);
+  
+  auto& tri=run.getTracer("tri");
+  for(int ig=1;ig<=3;ig++)
+    tri.addGammas(ig,5);
+  
+  auto& triNaz=run.getTracer("triNaz");
+  for(int ig=1;ig<=3;ig++)
+    triNaz.addGammas(ig,5);
+  
+  doNotMergeLinComb=true;
+  Smear sm0{.kappa=0.4,.n=80,.mom={0,0,0}};
+  
+  for(int iSo=0;iSo<5;iSo++)
+    for(int iRotSo=0;const auto& [nSo,momSo] : a[iSo])
+      {
+	Phase phSo{.mom=momSo};
+	Smear smSo{.kappa=0.4,.n=80,.mom=momSo/2.0};
+	const Line bwLine(prop.dag()*smSo*phSo.dag()*smSo.dag()*P5*DeltaT{.t=0}*prop*smSo.dag()*phSo*smSo*eta,std::format("bw{}",nSo));
+	
+	tri.tr(bwLine,
+	       Line(sm0*sm0*prop*eta,"sm_prop"));
+	
+	for(int iSi=0;iSi<5;iSi++)
+	  {
+	    Phase phSi{.mom=std::get<Momentum>(a[iSi].front())};
+	    Smear smSi{.kappa=0.4,.n=80,.mom=(std::get<Momentum>(a[iSi].front())/2.0)};
+	    auto getT=
+	      [&prop,
+	       &eta,
+	       &phSi,
+	       &smSi](const size_t t)
+	      {
+		return prop.dag()*DeltaT{.t=t}*smSi.dag()*phSi*P5*smSi*prop*eta;
+	      };
+	    
+	    const size_t t0=5;
+	    if(iSo==0 and iRotSo==0)
+	      for(size_t t=t0;t<25;t++)
+		triNaz.tr(Line(prop*smSi.dag()*phSi*smSi*eta,std::format("nazBwSi{}",iSi)), ///Correct, even if on so
+			  Line(getT(t),std::format("nazFwT{}Si{}",t,iSi)));
+	    
+	    Line cumul=DeltaT{.t=t0}*getT(t0);
+	    for(size_t t=t0+1;t<25;t++)
+	      cumul=cumul+DeltaT{.t=t}*getT(t);
+	    
+	    box.tr(bwLine,
+		   Line(smSi*phSi.dag()*smSi.dag()*cumul,std::format("fwP{}",iSi)));
+	  }
+	
+	iRotSo++;
+      }
+  
+  run.compile();
+  
+  print(run);
+}
+
 int main()
 {
   // comboA();
   // comboB();
   
-  localBox();
+  //localBox();
+  smeBox();
   
   //box();
   //dir3();
