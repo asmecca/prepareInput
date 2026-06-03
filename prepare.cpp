@@ -352,7 +352,7 @@ void smeBox()
 				     {"M012",{0,-2,-4}}}};
   
   const Source eta(0);
-  const Prop prop{.kappa=0.1394267,.mass=0.00066690,.r=1,.charge=0.0,.residue=1e-20};
+  const Prop prop{.kappa=0.1394267,.mass=0.00066690,.r=-1,.charge=0.0,.residue=1e-20};
   
   Run run;
   
@@ -375,10 +375,10 @@ void smeBox()
       {
 	Phase phSo{.mom=momSo};
 	Smear smSo{.kappa=0.4,.n=80,.mom=momSo/2.0};
-	const Line bwLine(prop*smSo*phSo.dag()*smSo.dag()*P5*DeltaT{.t=0}*prop.dag()*smSo.dag()*phSo*smSo*eta,std::format("bw{}",nSo));
+	const Line bwLine(prop.dag()*smSo*phSo.dag()*smSo.dag()*P5*DeltaT{.t=0}*prop*smSo.dag()*phSo*smSo*eta,std::format("bw{}",nSo));
 	
 	tri.tr(bwLine,
-	       Line(sm0*sm0*prop.dag()*eta,"sm_prop"));
+	       Line(sm0*sm0*prop*eta,"sm_prop"));
 	
 	for(int iSi=0;iSi<5;iSi++)
 	  {
@@ -390,13 +390,13 @@ void smeBox()
 	       &phSi,
 	       &smSi](const size_t t)
 	      {
-		return prop*DeltaT{.t=t}*smSi.dag()*phSi*P5*smSi*prop.dag()*eta;
+		return prop.dag()*DeltaT{.t=t}*smSi.dag()*phSi*P5*smSi*prop*eta;
 	      };
 	    
 	    const size_t t0=5;
 	    if(iSo==0 and iRotSo==0)
 	      for(size_t t=t0;t<25;t++)
-		triNaz.tr(Line(prop.dag()*smSi.dag()*phSi*smSi*eta,std::format("nazBwSi{}",iSi)), ///Correct, even if on so
+		triNaz.tr(Line(prop*smSi.dag()*phSi*smSi*eta,std::format("nazBwSi{}",iSi)), ///Correct, even if on so
 			  Line(getT(t),std::format("nazFwT{}Si{}",t,iSi)));
 	    
 	    Line cumul=DeltaT{.t=t0}*getT(t0);
