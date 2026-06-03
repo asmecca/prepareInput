@@ -263,7 +263,7 @@ void localBox()
 				     {"M012",{0,-2,-4}}}};
   
   const Source eta(0);
-  const Prop prop{.kappa=0.1394267,.mass=0.00066690,.r=1,.charge=0.0,.residue=1e-20};
+  const Prop prop{.kappa=0.1394267,.mass=0.00066690,.r=-1,.charge=0.0,.residue=1e-20};
   
   Run run;
   
@@ -284,10 +284,10 @@ void localBox()
     for(int iRotSo=0;const auto& [nSo,momSo] : a[iSo])
       {
 	Phase phSo{.mom=momSo};
-	const Line bwLine(prop*phSo.dag()*P5*DeltaT{.t=0}*prop.dag()*phSo*eta,std::format("bw{}",nSo));
+	const Line bwLine(prop.dag()*phSo.dag()*P5*DeltaT{.t=0}*prop*phSo*eta,std::format("bw{}",nSo));
 	
 	tri.tr(bwLine,
-	       Line(prop.dag()*eta,"-"));
+	       Line(prop*eta,"-"));
 	
 	for(int iSi=0;iSi<5;iSi++)
 	  {
@@ -297,13 +297,13 @@ void localBox()
 	       &eta,
 	       &phSi](const size_t t)
 	      {
-		return prop*DeltaT{.t=t}*phSi*P5*prop.dag()*eta;
+		return prop.dag()*DeltaT{.t=t}*phSi*P5*prop*eta;
 	      };
 	    
 	    const size_t t0=5;
 	    if(iSo==0 and iRotSo==0)
 	      for(size_t t=t0;t<25;t++)
-		triNaz.tr(Line(prop.dag()*phSi*eta,std::format("nazBwSi{}",iSi)), ///Correct, even if on so
+		triNaz.tr(Line(prop*phSi*eta,std::format("nazBwSi{}",iSi)), ///Correct, even if on so
 			  Line(getT(t),std::format("nazFwT{}Si{}",t,iSi)));
 	    
 	    Line cumul=DeltaT{.t=t0}*getT(t0);
