@@ -448,14 +448,72 @@ void smeBox()
   print(run);
 }
 
+void smeDir()
+{
+  using Entry=
+    std::tuple<const char*,Momentum>;
+  
+  std::vector<std::vector<Entry>> a{{std::tuple
+				     {"PZ",Momentum{0,0,2}},
+				     {"MZ",{0,0,-2}}},
+				    {{"0P11",{0,2,2}},
+				     {"0M11",{0,-2,-2}}},
+				    {{"P111",{2,2,2}},
+				     {"M111",{-2,-2,-2}}},
+				    {{"PZ2",{0,0,4}},
+				     {"MZ2",{0,0,-4}}},
+				    {{"P012",{0,2,4}},
+				     {"M012",{0,-2,-4}}}};
+  
+  const Source eta(0);
+  const Prop prop1{.kappa=0.1394267,.mass=0.00066690,.r=+1,.charge=0.0,.residue=1e-20};
+  const Prop prop0{.kappa=0.1394267,.mass=0.00066690,.r=-1,.charge=0.0,.residue=1e-20};
+ 
+  Run run;
+  
+  auto& dir=run.getTracer("dir");
+  dir.addGammas(5,5);
+
+  auto& current=run.getTracer("current");
+  current.addGammas(1,1);
+  current.addGammas(2,2);
+  current.addGammas(3,3);
+  
+  auto getOp=
+    [](const Momentum& mom)
+    {
+      const Phase ph{.mom=mom/2.0};
+      
+      const Smear sm{.kappa=0.4,.n=80,.mom=mom/2.0};
+      //const Smear smPi1qBar{.kappa=0.4,.n=80,.mom=-mom/2.0};
+      
+      return sm*ph;
+    };
+  
+  for(int iSo=0;iSo<5;iSo++)
+    for(int iRotSo=0;const auto& [nSo,momSo] : a[iSo])
+      {
+	const Oper Oso=getOp(momSo);
+	const Oper Osi=Oso.dag();
+	const Line bwLine(Osi*prop0*Oso*eta,std::format("bw{}",nSo));
+	dir.tr(bwLine,bwLine);
+	iRotSo++;
+      }
+  run.compile();
+  
+  // run.debugContr=true;
+  // run.debugFree=true;
+  print(run);
+}
+
 int main()
 {
   // comboA();
   // comboB();
   
   //localBox();
-  smeBox();
-  
+  //smeBox();
+  smeDir();
   //box();
   //dir3();
   
