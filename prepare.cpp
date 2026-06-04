@@ -320,12 +320,12 @@ void localBox()
 	    
 	    const size_t t0=5;
 	    if(iSo==0 and iRotSo==0)
-	      for(size_t t=t0;t<25;t++)
+	      for(size_t t=t0;t<26;t++)
 		triNaz.tr(Line(prop*phSi*eta,std::format("nazBwSi{}",iSi)), ///Correct, even if on so
 			  Line(getT(t),std::format("nazFwT{}Si{}",t,iSi)));
 	    
 	    Line cumul=DeltaT{.t=t0}*getT(t0);
-	    for(size_t t=t0+1;t<25;t++)
+	    for(size_t t=t0+1;t<26;t++)
 	      cumul=cumul+DeltaT{.t=t}*getT(t);
 	    
 	    box.tr(bwLine,
@@ -424,13 +424,14 @@ void smeBox()
 	      };
 	    
 	    const size_t t0=5;
+	    const size_t tf=26;
 	    if(iSo==0 and iRotSo==0)
-	      for(size_t t=t0;t<25;t++)
+	      for(size_t t=t0;t<tf;t++)
 		triNaz.tr(Line(propDiffTime*pi3*eta,std::format("nazBwSi{}",iSi)), ///Correct, even if on so
 			  Line(getT(t),std::format("nazFwT{}Si{}",t,iSi)));
 	    
 	    Line cumul=DeltaT{.t=t0}*getT(t0);
-	    for(size_t t=t0+1;t<25;t++)
+	    for(size_t t=t0+1;t<tf;t++)
 	      cumul=cumul+DeltaT{.t=t}*getT(t);
 	    
 	    box.tr(bwLine,
