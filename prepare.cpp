@@ -478,39 +478,30 @@ void smeDir()
   current.addGammas(1,1);
   current.addGammas(2,2);
   current.addGammas(3,3);
-  
-  auto getOp=
-    [](const Momentum& mom)
-    {
-      const Phase ph{.mom=mom/2.0};
-      
-      const Smear sm{.kappa=0.4,.n=80,.mom=mom/2.0};
-      //const Smear smPi1qBar{.kappa=0.4,.n=80,.mom=-mom/2.0};
-      
-      return ph*sm;
-    };
-  
+    
   for(int iSo=0;iSo<5;iSo++)
     {
       const auto& [nSo, momSo] = a[iSo][0];
-      for(int iRotSi=0;const auto& [nSo,momSi] : a[iSo])
-	{	
-	  //const Oper Osi=getOp(momSi);
-	  //const Oper Osi=Oso.dag();
-	  const Phase phSoM{.mom=-momSo/2.0};
-	  const Phase phSoP{.mom=momSo/2.0};
-	  const Smear smSoP{.kappa=0.4,.n=80,.mom=momSo/2.0};
-	  const Smear smSoM{.kappa=0.4,.n=80,.mom=-momSo/2.0};
-	  const Phase phSiM{.mom=-momSi/2.0};
-	  const Phase phSiP{.mom=momSi/2.0};
-	  const Smear smSiP{.kappa=0.4,.n=80,.mom=momSi/2.0};
-	  const Smear smSiM{.kappa=0.4,.n=80,.mom=-momSi/2.0};
-	  const Line bwLine(phSiM*smSiM*prop0*smSoP*phSoM*eta,std::format("bw{}",nSo));
-	  const Line fwLine(phSiP*smSiP*prop0*smSoM*phSoP*eta,std::format("fw{}",nSo));
-	  dir.tr(bwLine,fwLine);
-	  iRotSi++;
-	}
+      for(int iSi=0;iSi<5;iSi++)
+	for(int iRotSi=0;const auto& [nSi,momSi] : a[iSi])
+	  {	
+	    const Phase phSoM{.mom=-momSo/2.0};
+	    const Phase phSoP{.mom=momSo/2.0};
+	    const Smear smSoP{.kappa=0.4,.n=80,.mom=momSo/2.0};
+	    const Smear smSoM{.kappa=0.4,.n=80,.mom=-momSo/2.0};
+	    const Phase phSiM{.mom=-momSi/2.0};
+	    const Phase phSiP{.mom=momSi/2.0};
+	    const Smear smSiP{.kappa=0.4,.n=80,.mom=momSi/2.0};
+	    const Smear smSiM{.kappa=0.4,.n=80,.mom=-momSi/2.0};
+	    const Line bwLine(phSiM*smSiM*prop0*smSoP*phSoM*eta,std::format("bw{}_{}",nSi,nSo));
+	    const Line fwLine(phSiP*smSiP*prop0*smSoM*phSoP*eta,std::format("fw{}_{}",nSi,nSo));
+	    dir.tr(bwLine,fwLine);
+	    iRotSi++;
+	  }
     }
+  const Line bwLineJ(prop1*eta,"propR1");
+  const Line fwLineJ(prop0*eta,"propR0");
+  current.tr(bwLineJ,fwLineJ);
   run.compile();
   
   // run.debugContr=true;
