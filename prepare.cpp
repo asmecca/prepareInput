@@ -487,18 +487,30 @@ void smeDir()
       const Smear sm{.kappa=0.4,.n=80,.mom=mom/2.0};
       //const Smear smPi1qBar{.kappa=0.4,.n=80,.mom=-mom/2.0};
       
-      return sm*ph;
+      return ph*sm;
     };
   
   for(int iSo=0;iSo<5;iSo++)
-    for(int iRotSo=0;const auto& [nSo,momSo] : a[iSo])
-      {
-	const Oper Oso=getOp(momSo);
-	const Oper Osi=Oso.dag();
-	const Line bwLine(Osi*prop0*Oso*eta,std::format("bw{}",nSo));
-	dir.tr(bwLine,bwLine);
-	iRotSo++;
-      }
+    {
+      const auto& [nSo, momSo] = a[iSo][0];
+      for(int iRotSi=0;const auto& [nSo,momSi] : a[iSo])
+	{	
+	  //const Oper Osi=getOp(momSi);
+	  //const Oper Osi=Oso.dag();
+	  const Phase phSoM{.mom=-momSo/2.0};
+	  const Phase phSoP{.mom=momSo/2.0};
+	  const Smear smSoP{.kappa=0.4,.n=80,.mom=momSo/2.0};
+	  const Smear smSoM{.kappa=0.4,.n=80,.mom=-momSo/2.0};
+	  const Phase phSiM{.mom=-momSi/2.0};
+	  const Phase phSiP{.mom=momSi/2.0};
+	  const Smear smSiP{.kappa=0.4,.n=80,.mom=momSi/2.0};
+	  const Smear smSiM{.kappa=0.4,.n=80,.mom=-momSi/2.0};
+	  const Line bwLine(phSiM*smSiM*prop0*smSoP*phSoM*eta,std::format("bw{}",nSo));
+	  const Line fwLine(phSiP*smSiP*prop0*smSoM*phSoP*eta,std::format("fw{}",nSo));
+	  dir.tr(bwLine,fwLine);
+	  iRotSi++;
+	}
+    }
   run.compile();
   
   // run.debugContr=true;
