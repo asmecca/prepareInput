@@ -1393,6 +1393,8 @@ struct Run
   
   bool debugContr{};
   
+  bool debugPressure{};
+  
   std::vector<std::unique_ptr<Contracter>> contracters;
   
   std::unordered_set<std::unique_ptr<Node>,
@@ -1648,6 +1650,22 @@ struct Run
 	      }},n->shape.task);
   }
   
+  /// Pressure before executing node
+  int getMemoryPressure(const size_t& i) const
+  {
+    int memoryPressure{};
+    for(size_t iLoop=0;iLoop<=i and iLoop<executeList.size();iLoop++)
+      {
+	const Node* node=executeList[iLoop];
+	if((std::holds_alternative<ExtendSelectingTPars>(node->shape.task) or
+	    std::holds_alternative<Source>(node->shape.task))
+	    and node->lastUse>=i)
+	  memoryPressure++;
+      }
+    
+    return memoryPressure;
+  }
+  
   std::string printSources() const
   {
     const size_t nSources=
@@ -1688,9 +1706,18 @@ struct Run
       [&table,
        this](const size_t& i)
       {
-	for(const std::unique_ptr<Node>& maybeFreeable : nodes)
-	  if(i and maybeFreeable->lastUse==i)
-	    table.comment("free "+maybeFreeable->name);
+	int memoryPressure=getMemoryPressure(i);
+	
+	for(size_t iLoop=0;iLoop<i;iLoop++)
+	  {
+	    const Node* maybeFreeable=executeList[iLoop];
+	    
+	    if(i and maybeFreeable->lastUse==i)
+	      {
+		memoryPressure--;
+		table.comment(std::format("free {} pressure: {}",maybeFreeable->name,memoryPressure));
+	      }
+	  }
       };
     
     size_t nProps{};
@@ -1724,6 +1751,9 @@ struct Run
 	    table.newLine();
 	    nProps++;
 	  },e->pars);
+	
+	if(debugPressure)
+	  table.comment(std::format("pressure: {}",getMemoryPressure(i)));
 	
 	if(debugContr)
 	  if(const Contr* c=std::get_if<Contr>(&n->shape.task))
