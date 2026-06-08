@@ -1225,7 +1225,7 @@ struct Node
   {
     return nScheduledDeps==shape.deps.size();
   }
-
+  
   std::string getSource() const
   {
     std::ostringstream os;
@@ -1373,7 +1373,7 @@ struct PrintLiner
       {
 	if(const std::vector<std::string>& comments=commentsPerRow[iRow];comments.size())
 	  for(const std::string& comment : comments)
-	    os<<"/* "<<comment<<"*/"<<endl;
+	    os<<"/* "<<comment<<" */"<<endl;
 	
 	if(iRow<nLines)
 	  {
