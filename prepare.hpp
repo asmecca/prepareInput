@@ -151,7 +151,7 @@ inline void internal_crash(const int& line,
   va_list args;
   
   va_start(args,format);
-  vsprintf(buffer,format,args);
+  vsnprintf(buffer,1024,format,args);
   va_end(args);
   
   cerr<<"ERROR in function "<<func<<" at line "<<line<<" of file "<<file<<": \""<<buffer<<"\""<<endl;
