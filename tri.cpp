@@ -342,15 +342,6 @@ void localBox()
 
 void smeBox()
 {
-  // struct Entry
-  // {
-  //   const char* name;
-    
-  //   const Momentum mom;
-    
-  //   const double w;
-  // };
-  
   std::vector<Momentum> list{{0,0,1},{0,1,1},{1,1,1},{0,0,2},{0,1,2}};
   
   // /* https://arxiv.org/pdf/1203.6041 pag.32 */
