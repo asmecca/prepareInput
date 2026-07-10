@@ -342,38 +342,45 @@ void localBox()
 
 void smeBox()
 {
-  struct Entry
-  {
-    const char* name;
+  // struct Entry
+  // {
+  //   const char* name;
     
-    const Momentum mom;
+  //   const Momentum mom;
     
-    const double w;
-  };
+  //   const double w;
+  // };
   
-  std::vector<std::vector<Entry>> a{{Entry
-				     {"PZ",Momentum{0,0,2},1.0},
-				     {"MZ",{0,0,-2},-1.0}},
-				    {{"0P11",{0,2,2},1.0},
-				     {"0M11",{0,-2,-2},-1.0},
-				     {"P101",{2,0,2},1.0},
-				     {"M101",{-2,0,-2},-1.0},
-				     {"0M1P1",{0,-2,2},1.0},
-				     {"0P1M1",{0,2,-2},-1.0},
-				     {"M10P1",{-2,0,2},1.0},
-				     {"P10M1",{2,0,-2},-1.0}},
-				    {{"P111",{2,2,2},1.0},
-				     {"M111",{-2,-2,-2},-1.0},
-				     {"M1P11",{-2,2,2},1.0},
-				     {"P1M11",{2,-2,-2},-1.0},
-				     {"P1M1P1",{2,-2,2},1.0},
-				     {"M1P1M1",{-2,2,-2},-1.0},
-				     {"M11P1",{-2,-2,2},1.0},
-				     {"P11M1",{2,2,-2},-1.0}},
-				    {{"PZ2",{0,0,4},1.0},
-				     {"MZ2",{0,0,-4},-1.0}},
-				    {{"0P12",{0,2,4},1.0},
-				     {"0M12",{0,-2,-4},-1.0}}};
+  std::vector<Momentum> list{{0,0,1},{0,1,1},{1,1,1},{0,0,2},{0,1,2}};
+  
+  // /* https://arxiv.org/pdf/1203.6041 pag.32 */
+  // std::vector<std::vector<Entry>> a{{Entry
+  // 				     {"PZ",{0,0,+2},+1.0}, // tab XVI 00n
+  // 				     {"MZ",{0,0,-2},-1.0}},
+				    
+  // 				    {{"0P11", {0,+2,+2},+1.0}, // tab XVII 0nn
+  // 				     {"0M11", {0,-2,-2},-1.0},
+  // 				     {"P101", {+2,0,+2},+1.0},
+  // 				     {"M101", {-2,0,-2},-1.0},
+  // 				     {"0M1P1",{0,-2,+2},+1.0},
+  // 				     {"0P1M1",{0,+2,-2},-1.0},
+  // 				     {"M10P1",{-2,0,+2},+1.0},
+  // 				     {"P10M1",{+2,0,-2},-1.0}},
+				    
+  // 				    {{"P111",  {+2,+2,+2},+1.0},  // 0 tab XVII 0nn
+  // 				     {"M111",  {-2,-2,-2},-1.0},  // 7
+  // 				     {"M1P11", {-2,+2,+2},+1.0},  // 1
+  // 				     {"P1M11", {+2,-2,-2},-1.0},  // 5
+  // 				     {"P1M1P1",{+2,-2,+2},+1.0},  // 2
+  // 				     {"M1P1M1",{-2,+2,-2},-1.0},  // 6
+  // 				     {"M11P1", {-2,-2,+2},+1.0},  // 4
+  // 				     {"P11M1", {+2,+2,-2},-1.0}}, // 3
+				    
+  // 				    {{"PZ2",{0,0,+4},+1.0}, // tab XVI 00n
+  // 				     {"MZ2",{0,0,-4},-1.0}},
+				    
+  // 				    {{"0P12",{0,+2,+4},+1.0},
+  // 				     {"0M12",{0,-2,-4},-1.0}}};
   
   const Source eta(0);
   const Prop propSameTime{.kappa=0.1394267,.mass=0.00066690,.r=+1,.charge=0.0,.residue=1e-20};
@@ -390,13 +397,13 @@ void smeBox()
     for(int ig=1;ig<=3;ig++)
       t->addGammas(ig,5);
   
-  // auto& triNaz=run.getTracer("triNaz");
-  // for(int ig=1;ig<=3;ig++)
-  //   triNaz.addGammas(ig,5);
+  auto& triNaz=run.getTracer("triNaz");
+  for(int ig=1;ig<=3;ig++)
+    triNaz.addGammas(ig,5);
   
   doNotMergeLinComb=true;
   
-  // const Smear smV{.kappa=0.4,.n=160};
+  const Smear smV{.kappa=0.4,.n=160};
   
   auto getOp=
     [](const Momentum& mom)
@@ -414,35 +421,73 @@ void smeBox()
       auto getLine=
 	[&getOp,
 	 &propSameTime,
-	 &eta](const std::string& nSo,
-	       const Momentum& momSo) -> Line
+	 &eta](const Momentum& momSo) -> Line
 	{
 	  
 	  const Oper pi1=getOp(momSo);
 	  const Oper pi2=pi1.dag();
-	  return {pi2*P5*DeltaT{.t=0}*propSameTime.dag()*pi1*eta,std::format("bw{}",nSo)};
+	  return {pi2*P5*DeltaT{.t=0}*propSameTime.dag()*pi1*eta};
 	};
       
-      Line sameTimeLine=
-	getLine(a[iSo].front().name,a[iSo].front().mom);
+      std::unique_ptr<Line> sameTimeLine;
       
-      for(size_t i=1;i<a[iSo].size();i++)
-	{
-	  const auto& [nSo,momSo,w]=a[iSo][i];
-	  sameTimeLine=sameTimeLine+w*getLine(nSo,momSo);
-	}
+      Momentum mom=
+	list[iSo];
       
-      const Line bwLine(propDiffTime*sameTimeLine,std::format("bw{}",iSo));
+      do
+	if(mom[2])
+	  for(int i=0;i<8;i++)
+	    if(const auto [compute,signedMom]=
+	       [](const int& i,
+		  const Momentum& mom)
+	       {
+		 /// Signed version of momentum
+		 Momentum signedMom;
+		 
+		 /// Keep track of whether to compute this flip or not: only if the momentum is non zero in flipped direction
+		 bool compute{true};
+		 for(int mu=0;mu<3;mu++)
+		   {
+		     /// Decide whether to flip the sign of the mu direction
+		     const bool flipThisDir=
+		       ((i>>mu)&1);
+		     
+		     /// Current momentum
+		     const int& curMom=
+		       mom[mu];
+		     
+		     signedMom[mu]=
+		       flipThisDir?-curMom:curMom;
+		     
+		     if(curMom==0 and flipThisDir)
+		       compute=false;
+		   }
+		 
+		 return std::make_pair(compute,signedMom);
+	       }(i,mom);compute)
+	      {
+		/// Current contribution
+		const Line curContr=
+		  signedMom[2]*getLine(signedMom);
+		
+		if(sameTimeLine)
+		  *sameTimeLine=*sameTimeLine+curContr;
+		else
+		  sameTimeLine=std::make_unique<Line>(curContr);
+	      }
+      while(std::next_permutation(mom.begin(),mom.end()));
       
-	  // tri.tr(bwLine,
-	  // 	 Line(propDiffTime*eta,"sm_prop"));
-	  
-	  // triSme.tr(bwLine,
-	  // 	    Line(smV*propDiffTime*eta,"sm_sm_prop"));
+      const Line bwLine(propDiffTime*(*sameTimeLine),std::format("bw{}",iSo));
+      
+      tri.tr(bwLine,
+	     Line(propDiffTime*eta));
+      
+      triSme.tr(bwLine,
+		Line(smV*propDiffTime*eta,"sm_prop"));
 	
 	for(int iSi=0;iSi<5;iSi++)
 	  {
-	    const Oper pi3=getOp(a[iSi].front().mom);
+	    const Oper pi3=getOp(list[iSi]);
 	    const Oper pi4=pi3.dag();
 	    auto getT=
 	      [&propSameTime,
@@ -455,17 +500,18 @@ void smeBox()
 	    
 	    const size_t t0=5;
 	    const size_t tf=26;
-	    // if(iSo==0 and iRotSo==0)
-	    //   for(size_t t=t0;t<tf;t++)
-	    // 	triNaz.tr(Line(propDiffTime*pi3*eta,std::format("nazBwSi{}",iSi)), ///Correct, even if on so
-	    // 		  Line(getT(t),std::format("nazFwT{}Si{}",t,iSi)));
+	    
+	    if(iSo==0)
+	      for(size_t t=t0;t<tf;t++)
+		triNaz.tr(Line(propDiffTime*pi3*eta,std::format("nazBwSi{}",iSi)), ///Correct, even if on so
+			  Line(getT(t),std::format("nazFwT{}Si{}",t,iSi)));
 	    
 	    Line cumul=DeltaT{.t=t0}*getT(t0);
 	    for(size_t t=t0+1;t<tf;t++)
 	      cumul=cumul+DeltaT{.t=t}*getT(t);
 	    
 	    box.tr(bwLine,
-		   Line(pi4*cumul,std::format("fwP{}",iSi)));
+		   Line(pi4*cumul,std::format("fw{}",iSi)));
 	  }
     }
   
