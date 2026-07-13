@@ -1244,11 +1244,13 @@ struct Node
   
   std::string describe() const
   {
-    std::ostringstream os;
+    std::string res=
+     shape.describe();
     
-    return shape.describe();
+    if(not name.empty())
+      res+=" AKA "+name;
     
-    return os.str();
+    return res;
   }
   
   int memoryCostIfRun() const
