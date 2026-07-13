@@ -1513,12 +1513,13 @@ struct Run
     // report
     if(debugPrepare)
       {
-	cout<<"==========="<<endl;
+	cout<<"===== list of all users ======"<<endl;
 	for(const auto& n : nodes)
 	  {
 	    cout<<describe(*n)<<endl;
 	    cout<<" used by "<<n->users.size()<<endl;
 	  }
+	cout<<"===== *** END list of all user *** ======"<<endl;
       }
     
     std::vector<Node*> readyNodes;
