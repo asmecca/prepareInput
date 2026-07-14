@@ -1245,7 +1245,7 @@ struct Node
   std::string describe() const
   {
     std::string res=
-     shape.describe();
+      std::format("#{}",id)+shape.describe();
     
     if(not name.empty())
       res+=" AKA "+name;

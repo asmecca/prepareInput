@@ -17,7 +17,6 @@ void print(Run &run)
   // cout<<describe(OP)<<endl;
   // cout<<describe(OM)<<endl;
   
-  
   cout<<run.printContr()<<endl;
 }
 
@@ -276,7 +275,7 @@ void smeBox()
   
   for(const Line& b : bwLine)
     tri.tr(b,
-	   Line(propDiffTime*eta));
+	   Line(propDiffTime*eta,"fw"));
   
   cout<<"Total cost: "<<totalCost<<endl;
   run.compile();
@@ -303,29 +302,32 @@ void smeDir()
   current.addGammas(2,2);
   current.addGammas(3,3);
   
-  for(int iSo=0;iSo<5;iSo++)
+  for(int iMom=0;iMom<5;iMom++)
     {
-      const Momentum& momSo=momList[iSo];
-      for(int iSi=0;iSi<5;iSi++)
-	loopOnAllPerm([&momSo,
-		       &prop0,
-		       &dir,
-		       &eta,
-		       &iSo](const Momentum& momSi)
+      const auto [source,sink]=getAllPerms(momList[iMom]);
+      
+      for(size_t iSo{};const Momentum& momSo : source)
 	{
-	  const Phase phSoM{.mom=-momSo/2.0};
-	  const Phase phSoP{.mom=momSo/2.0};
-	  const Smear smSoP{.kappa=0.4,.n=80,.mom=momSo/2.0};
-	  const Smear smSoM{.kappa=0.4,.n=80,.mom=-momSo/2.0};
-	  const Phase phSiM{.mom=-momSi/2.0};
-	  const Phase phSiP{.mom=momSi/2.0};
-	  const Smear smSiP{.kappa=0.4,.n=80,.mom=momSi/2.0};
-	  const Smear smSiM{.kappa=0.4,.n=80,.mom=-momSi/2.0};
-	  const Line bwLine(phSiM*smSiM*prop0*smSoP*phSoM*eta,std::format("bw{}_({},{},{})",iSo,momSi[0],momSi[1],momSi[2]));
-	  const Line fwLine(phSiP*smSiP*prop0*smSoM*phSoP*eta,std::format("fw{}_({},{},{})",iSo,momSi[0],momSi[1],momSi[2]));
-	  dir.tr(bwLine,fwLine);
-	},momList[iSi]);
+	  for(size_t iSi{};const Momentum& momSi : sink)
+	    {
+	      const Phase phSoM{.mom=-momSo/2.0};
+	      const Phase phSoP{.mom=momSo/2.0};
+	      const Smear smSoP{.kappa=0.4,.n=80,.mom=momSo/2.0};
+	      const Smear smSoM{.kappa=0.4,.n=80,.mom=-momSo/2.0};
+	      const Phase phSiM{.mom=-momSi/2.0};
+	      const Phase phSiP{.mom=momSi/2.0};
+	      const Smear smSiP{.kappa=0.4,.n=80,.mom=momSi/2.0};
+	      const Smear smSiM{.kappa=0.4,.n=80,.mom=-momSi/2.0};
+	      const Line bwLine(phSiM*smSiM*prop0*smSoP*phSoM*eta,std::format("bw{}_{}_{}",iMom,iSo,iSi));
+	      const Line fwLine(phSiP*smSiP*prop0*smSoM*phSoP*eta,std::format("fw{}_{}_{}",iMom,iSo,iSi));
+	      dir.tr(bwLine,fwLine);
+	      
+	      iSi++;
+	    }
+	  iSo++;
+	}
     }
+  
   const Line bwLineJ(prop1*eta,"propR1");
   const Line fwLineJ(prop0*eta,"propR0");
   current.tr(bwLineJ,fwLineJ);
