@@ -276,7 +276,7 @@ void smeBox()
   
   for(const Line& b : bwLine)
     tri.tr(b,
-	   Line(propDiffTime*eta));
+	   Line(propDiffTime*eta,"fw"));
   
   cout<<"Total cost: "<<totalCost<<endl;
   run.compile();
@@ -286,6 +286,7 @@ void smeBox()
   print(run);
 }
 
+/*
 void smeDir()
 {
   const Source eta(0);
@@ -335,6 +336,7 @@ void smeDir()
   // run.debugFree=true;
   print(run);
 }
+*/
 
 int main()
 {
