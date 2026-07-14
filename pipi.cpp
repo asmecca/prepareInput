@@ -275,7 +275,7 @@ void smeBox()
   
   for(const Line& b : bwLine)
     tri.tr(b,
-	   Line(propDiffTime*eta));
+	   Line(propDiffTime*eta,"fw"));
   
   cout<<"Total cost: "<<totalCost<<endl;
   run.compile();
@@ -302,7 +302,7 @@ void smeDir()
   current.addGammas(2,2);
   current.addGammas(3,3);
   
-  for(int iSo=0;iSo<5;iSo++)
+  for(int iMom=0;iMom<5;iMom++)
     {
       const auto [source,sink]=getAllPerms(momList[iMom]);
       
