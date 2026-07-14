@@ -320,12 +320,12 @@ void localBox()
 	    
 	    const size_t t0=5;
 	    if(iSo==0 and iRotSo==0)
-	      for(size_t t=t0;t<25;t++)
+	      for(size_t t=t0;t<26;t++)
 		triNaz.tr(Line(prop*phSi*eta,std::format("nazBwSi{}",iSi)), ///Correct, even if on so
 			  Line(getT(t),std::format("nazFwT{}Si{}",t,iSi)));
 	    
 	    Line cumul=DeltaT{.t=t0}*getT(t0);
-	    for(size_t t=t0+1;t<25;t++)
+	    for(size_t t=t0+1;t<26;t++)
 	      cumul=cumul+DeltaT{.t=t}*getT(t);
 	    
 	    box.tr(bwLine,
@@ -424,13 +424,14 @@ void smeBox()
 	      };
 	    
 	    const size_t t0=5;
+	    const size_t tf=26;
 	    if(iSo==0 and iRotSo==0)
-	      for(size_t t=t0;t<25;t++)
+	      for(size_t t=t0;t<tf;t++)
 		triNaz.tr(Line(propDiffTime*pi3*eta,std::format("nazBwSi{}",iSi)), ///Correct, even if on so
 			  Line(getT(t),std::format("nazFwT{}Si{}",t,iSi)));
 	    
 	    Line cumul=DeltaT{.t=t0}*getT(t0);
-	    for(size_t t=t0+1;t<25;t++)
+	    for(size_t t=t0+1;t<tf;t++)
 	      cumul=cumul+DeltaT{.t=t}*getT(t);
 	    
 	    box.tr(bwLine,
@@ -447,14 +448,75 @@ void smeBox()
   print(run);
 }
 
+void smeDir()
+{
+  using Entry=
+    std::tuple<const char*,Momentum>;
+  
+  std::vector<std::vector<Entry>> a{{std::tuple
+				     {"PZ",Momentum{0,0,2}},
+				     {"MZ",{0,0,-2}}},
+				    {{"0P11",{0,2,2}},
+				     {"0M11",{0,-2,-2}}},
+				    {{"P111",{2,2,2}},
+				     {"M111",{-2,-2,-2}}},
+				    {{"PZ2",{0,0,4}},
+				     {"MZ2",{0,0,-4}}},
+				    {{"P012",{0,2,4}},
+				     {"M012",{0,-2,-4}}}};
+  
+  const Source eta(0);
+  const Prop prop1{.kappa=0.1394267,.mass=0.00066690,.r=+1,.charge=0.0,.residue=1e-20};
+  const Prop prop0{.kappa=0.1394267,.mass=0.00066690,.r=-1,.charge=0.0,.residue=1e-20};
+ 
+  Run run;
+  
+  auto& dir=run.getTracer("dir");
+  dir.addGammas(5,5);
+
+  auto& current=run.getTracer("current");
+  current.addGammas(1,1);
+  current.addGammas(2,2);
+  current.addGammas(3,3);
+    
+  for(int iSo=0;iSo<5;iSo++)
+    {
+      const auto& [nSo, momSo] = a[iSo][0];
+      for(int iSi=0;iSi<5;iSi++)
+	for(int iRotSi=0;const auto& [nSi,momSi] : a[iSi])
+	  {	
+	    const Phase phSoM{.mom=-momSo/2.0};
+	    const Phase phSoP{.mom=momSo/2.0};
+	    const Smear smSoP{.kappa=0.4,.n=80,.mom=momSo/2.0};
+	    const Smear smSoM{.kappa=0.4,.n=80,.mom=-momSo/2.0};
+	    const Phase phSiM{.mom=-momSi/2.0};
+	    const Phase phSiP{.mom=momSi/2.0};
+	    const Smear smSiP{.kappa=0.4,.n=80,.mom=momSi/2.0};
+	    const Smear smSiM{.kappa=0.4,.n=80,.mom=-momSi/2.0};
+	    const Line bwLine(phSiM*smSiM*prop0*smSoP*phSoM*eta,std::format("bw{}_{}",nSi,nSo));
+	    const Line fwLine(phSiP*smSiP*prop0*smSoM*phSoP*eta,std::format("fw{}_{}",nSi,nSo));
+	    dir.tr(bwLine,fwLine);
+	    iRotSi++;
+	  }
+    }
+  const Line bwLineJ(prop1*eta,"propR1");
+  const Line fwLineJ(prop0*eta,"propR0");
+  current.tr(bwLineJ,fwLineJ);
+  run.compile();
+  
+  // run.debugContr=true;
+  // run.debugFree=true;
+  print(run);
+}
+
 int main()
 {
   // comboA();
   // comboB();
   
   //localBox();
-  smeBox();
-  
+  //smeBox();
+  smeDir();
   //box();
   //dir3();
   
