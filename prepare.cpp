@@ -372,7 +372,7 @@ void smeBox()
   const Source eta(0);
   const Prop propSameTime{.kappa=0.1394267,.mass=0.00066690,.r=+1,.charge=0.0,.residue=1e-20};
   const Prop propDiffTime{.kappa=0.1394267,.mass=0.00066690,.r=-1,.charge=0.0,.residue=1e-20};
- 
+  
   Run run;
   
   auto& box=run.getTracer("box");

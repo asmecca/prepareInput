@@ -151,7 +151,7 @@ inline void internal_crash(const int& line,
   va_list args;
   
   va_start(args,format);
-  vsprintf(buffer,format,args);
+  vsnprintf(buffer,1024,format,args);
   va_end(args);
   
   cerr<<"ERROR in function "<<func<<" at line "<<line<<" of file "<<file<<": \""<<buffer<<"\""<<endl;
@@ -1225,7 +1225,7 @@ struct Node
   {
     return nScheduledDeps==shape.deps.size();
   }
-
+  
   std::string getSource() const
   {
     std::ostringstream os;
@@ -1244,11 +1244,13 @@ struct Node
   
   std::string describe() const
   {
-    std::ostringstream os;
+    std::string res=
+     shape.describe();
     
-    return shape.describe();
+    if(not name.empty())
+      res+=" AKA "+name;
     
-    return os.str();
+    return res;
   }
   
   int memoryCostIfRun() const
@@ -1373,7 +1375,7 @@ struct PrintLiner
       {
 	if(const std::vector<std::string>& comments=commentsPerRow[iRow];comments.size())
 	  for(const std::string& comment : comments)
-	    os<<"/* "<<comment<<"*/"<<endl;
+	    os<<"/* "<<comment<<" */"<<endl;
 	
 	if(iRow<nLines)
 	  {
@@ -1392,6 +1394,8 @@ struct Run
   bool debugFree{};
   
   bool debugContr{};
+  
+  bool debugPressure{};
   
   std::vector<std::unique_ptr<Contracter>> contracters;
   
@@ -1511,12 +1515,13 @@ struct Run
     // report
     if(debugPrepare)
       {
-	cout<<"==========="<<endl;
+	cout<<"===== list of all users ======"<<endl;
 	for(const auto& n : nodes)
 	  {
 	    cout<<describe(*n)<<endl;
 	    cout<<" used by "<<n->users.size()<<endl;
 	  }
+	cout<<"===== *** END list of all user *** ======"<<endl;
       }
     
     std::vector<Node*> readyNodes;
@@ -1648,6 +1653,22 @@ struct Run
 	      }},n->shape.task);
   }
   
+  /// Pressure before executing node
+  int getMemoryPressure(const size_t& i) const
+  {
+    int memoryPressure{};
+    for(size_t iLoop=0;iLoop<=i and iLoop<executeList.size();iLoop++)
+      {
+	const Node* node=executeList[iLoop];
+	if((std::holds_alternative<ExtendSelectingTPars>(node->shape.task) or
+	    std::holds_alternative<Source>(node->shape.task))
+	    and node->lastUse>=i)
+	  memoryPressure++;
+      }
+    
+    return memoryPressure;
+  }
+  
   std::string printSources() const
   {
     const size_t nSources=
@@ -1688,9 +1709,18 @@ struct Run
       [&table,
        this](const size_t& i)
       {
-	for(const std::unique_ptr<Node>& maybeFreeable : nodes)
-	  if(i and maybeFreeable->lastUse==i)
-	    table.comment("free "+maybeFreeable->name);
+	int memoryPressure=getMemoryPressure(i);
+	
+	for(size_t iLoop=0;iLoop<i;iLoop++)
+	  {
+	    const Node* maybeFreeable=executeList[iLoop];
+	    
+	    if(i and maybeFreeable->lastUse==i)
+	      {
+		memoryPressure--;
+		table.comment(std::format("free {} pressure: {}",maybeFreeable->name,memoryPressure));
+	      }
+	  }
       };
     
     size_t nProps{};
@@ -1724,6 +1754,9 @@ struct Run
 	    table.newLine();
 	    nProps++;
 	  },e->pars);
+	
+	if(debugPressure)
+	  table.comment(std::format("pressure: {}",getMemoryPressure(i)));
 	
 	if(debugContr)
 	  if(const Contr* c=std::get_if<Contr>(&n->shape.task))
