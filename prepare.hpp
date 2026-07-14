@@ -1558,6 +1558,9 @@ struct Run
 	      cout<<"Chosen the only possible node"<<endl;
 	    else
 	      cout<<"Chosen: "<<describe(*toBeRun)<<endl;
+	    
+	    if(toBeRun->name.empty() and not std::holds_alternative<Source>(toBeRun->shape.task))
+	      cout<<"Will be named P"<<(unnamedProgressive++)<<endl;
 	  }
 	
 	executeList.push_back(toBeRun);
