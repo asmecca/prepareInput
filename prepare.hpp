@@ -1290,7 +1290,7 @@ struct Contracter
 {
   Contr pars;
   
-  std::set<std::pair<Line,Line>> traces;
+  std::vector<std::pair<Line,Line>> traces;
   
   Contracter(const std::string& name) :
     pars{.name=name}
@@ -1306,8 +1306,9 @@ struct Contracter
   void tr(const Line& bw,
 	  const Line& fw)
   {
-    if(not traces.emplace(bw,fw).second)
+    if(std::find(traces.begin(),traces.end(),std::pair{bw,fw})!=traces.end())
       CRASH("inserting tr(%s,%s), trace already existing",bw.name.c_str(),fw.name.c_str());
+    traces.emplace_back(bw,fw);
   }
 };
 
@@ -1529,7 +1530,8 @@ struct Run
     for(const std::unique_ptr<Node>& n : nodes)
       if(n->shape.deps.empty())
         readyNodes.push_back(n.get());
-    
+
+    size_t unnamedProgressive{};
     while(not readyNodes.empty())
       {
 	std::sort(readyNodes.begin(),
