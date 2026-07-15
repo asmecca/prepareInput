@@ -205,7 +205,7 @@ void smeBox()
       cout<<"cost: "<<cost<<endl;
       totalCost+=cost;
       
-      std::optional<Line> sameTimeLine;
+      std::optional<Line> sameTimeLine; 
       for(const Momentum& signedMom : source)
 	{
 	  const Line curContr=
@@ -217,7 +217,8 @@ void smeBox()
 	    sameTimeLine=curContr;
 	}
       
-      bwLine.emplace_back(propDiffTime*(*sameTimeLine),std::format("bw{}",iMom));
+      //bwLine.emplace_back(propDiffTime*(*sameTimeLine),std::format("bw{}",iMom));
+      bwLine.emplace_back(propDiffTime.dag()*(*sameTimeLine),std::format("bw{}",iMom));
       
       /////////////////////////////////////////////////////////////////
       
@@ -275,7 +276,7 @@ void smeBox()
   
   for(const Line& b : bwLine)
     tri.tr(b,
-	   Line(propDiffTime*eta,"fw"));
+	   Line(propDiffTime*eta,"prop"));
   
   cout<<"Total cost: "<<totalCost<<endl;
   run.compile();
