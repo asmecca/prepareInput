@@ -168,10 +168,10 @@ void smeBox()
   auto getOp=
     [](const Momentum& mom)
     {
-      const Phase phPi1{.mom=mom};
+      const Phase phPi1{.mom=2*mom};
       
-      const Smear smPi1q{.kappa=0.4,.n=80,.mom=mom/2.0};
-      const Smear smPi1qBar{.kappa=0.4,.n=80,.mom=-mom/2.0};
+      const Smear smPi1q{.kappa=0.4,.n=80,.mom=mom/1.0};
+      const Smear smPi1qBar{.kappa=0.4,.n=80,.mom=-mom/1.0};
       
       return smPi1qBar*phPi1*smPi1q;
     };
@@ -286,7 +286,7 @@ void smeBox()
   print(run);
 }
 
-/*
+
 void smeDir()
 {
   const Source eta(0);
@@ -339,7 +339,7 @@ void smeDir()
   // run.debugFree=true;
   print(run);
 }
-*/
+
 
 int main()
 {
