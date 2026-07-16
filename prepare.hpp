@@ -1241,9 +1241,9 @@ struct Node
     return nRemainingDeps()==0;
   }
   
-  bool isJunction() const
+  bool isPassage() const
   {
-    return users.size()!=1 or shape.deps.size()!=1;
+    return users.size()==1 and shape.deps.size()==1;
   }
   
   std::string getSource() const
@@ -1580,203 +1580,204 @@ struct Run
 	cout<<"===== *** END list of all user *** ======"<<endl;
       }
     
-    cout<<"===== list of all junctions ======"<<endl;
-    std::map<int,std::set<std::tuple<int,std::vector<int>,bool>>> jmap;
-    std::map<int,bool> jcostMap;
-    for(const auto& n : nodes)
-      if(n->isJunction())
-	{
-	  jcostMap[n->id]=n->costToRun();
-	  
-	  for(auto u : n->users)
-	    {
-	      bool cost=u->costToRun();
-	      std::vector<int> passed;
-	      while((not u->isJunction()) and u->users.size()==1)
-		{
-		  u=u->users.front();
-		  passed.push_back(u->id);
-		  cost|=u->costToRun();
-		}
-	      
-	      if(passed.size())
-		passed.pop_back();
-	      
-	      if(u)
-		jmap[n->id].insert(std::tuple{u->id,passed,cost});
-	    }
-	}
+    // cout<<"===== list of all junctions ======"<<endl;
     
-    cout<<"Number of junctions: "<<jmap.size()<<endl;
-    int nArr{};
-    for(const auto& [j,uL] : jmap)
-      {
-	cout<<j<<" costs : "<<jcostMap[j]<<" and has "<<uL.size()<<endl;
-	// for(const int& u : uL)
-	//   cout<<"  "<<u<<endl;
-	nArr+=uL.size();
-      }
-    cout<<"Number of different arrows: "<<nArr<<endl;
-    
-    std::map<int,int> labels;
-    for(const auto& [j,uL] : jmap)
-      {
-	if(not labels.contains(j))
-	  labels[j]=labels.size();
-	
-	for(const auto& [u,_,cost] : uL)
-	  if(not labels.contains(u))
-	    labels[u]=labels.size();
-      }
-    
-    for(const auto& [id,label] : labels)
-      cout<<id<<" is labelled "<<label<<endl;
-    
-    struct Arrow
-    {
-      int from;
-      
-      int to;
-    };
-    
-    std::vector<Arrow> arrows;
-    for(const auto& [id,uL] : jmap)
-      for(const auto& [u,_,__] : uL)
-	arrows.emplace_back(labels[id],labels[u]);
-    
-    cout<<"Arrows:"<<endl;
-    for(const auto& [from,to] : arrows)
-      cout<<" "<<from<<" -> "<<to<<endl;
-    
-    struct Junction
-    {
-      std::vector<int> users;
-      
-      std::vector<int> deps;
-      
-      int cost;
-    };
-    
-    std::vector<Junction> junctions(labels.size());
-    for(const auto& [from,to] : arrows)
-      {
-	junctions[from].users.push_back(to);
-	junctions[to].deps.push_back(from);
-      }
-    
-    for(const auto& [j,cost] : jcostMap)
-      junctions[labels[j]].cost=cost;
-    
-    // for(int i{};Junction& j : junctions)
-    //   j.id=i++;
-    
-    // for(const auto& [j,uL] : jmap)
-    //   for(const int& u : uL)
+    // std::vector<std::vector<Node*>> macroNodes;
+    // for(const auto& n : nodes)
+    //   {
+    //   if(n->isJunction())
     // 	{
-    // 	  junctions[labels[j]].users.push_back(u);
-    // 	  junctions[labels[u]].deps.push_back(j);
+    // 	  jcostMap[n->id]=n->costToRun();
+	  
+    // 	  for(auto u : n->users)
+    // 	    {
+    // 	      bool cost=u->costToRun();
+    // 	      std::vector<int> passed;
+    // 	      while((not u->isJunction()) and u->users.size()==1)
+    // 		{
+    // 		  u=u->users.front();
+    // 		  passed.push_back(u->id);
+    // 		  cost|=u->costToRun();
+    // 		}
+	      
+    // 	      if(passed.size())
+    // 		passed.pop_back();
+	      
+    // 	      if(u)
+    // 		jmap[n->id].insert(std::tuple{u->id,passed,cost});
+    // 	    }
     // 	}
     
-    cout<<"Junctions: "<<endl;
-    for(int id{};const auto& [uL,dL,cost] : junctions)
-      {
-	cout<<" id: "<<id++<<endl;
-	cout<<" depends from: "<<endl;
-	for(const int& d : dL)
-	  cout<<"   "<<d<<endl;
-	cout<<" users: "<<endl;
-	for(const int& u : uL)
-	  cout<<"   "<<u<<endl;
-	cout<<" costs: "<<cost<<endl;
-      }
-    
-    std::vector<int> nDepsComputed(junctions.size());
-    
-    std::vector<int> nUsersComputed(junctions.size());
-    
-    std::vector<int> jHasBeenScheduled(junctions.size());
-    
-    // std::set<int> liveJunctions;
-    
-    std::vector<bool> arrowComputed(arrows.size());
-    
-    std::mt19937_64 gen(343464356);
-    int pressure{};
-    for(int i=0;i<(int)arrows.size();i++)
-      {
-	std::vector<int> iReadyArrow;
-	
-	for(size_t iarrow{};iarrow<arrows.size();iarrow++)
-	  if(not arrowComputed[iarrow])
-	    {
-	      const auto& [from,to]=arrows[iarrow];
-	      if(nDepsComputed[from]==(int)junctions[from].deps.size())
-		iReadyArrow.push_back(iarrow);
-	    }
-	
-	cout<<"Ready arrows:"<<endl;
-	for(const int& iReady : iReadyArrow)
-	  {
-	    const auto& [from,to]=arrows[iReady];
-	    cout<<from<<" -> "<<to<<endl;
-	  }
-	
-	const int iArrowToSchedule=
-	  std::uniform_int_distribution<>(0,iReadyArrow.size()-1)(gen);
-	const int arrowToSchedule=
-	  iReadyArrow[iArrowToSchedule];
-	cout<<"Scheduling "<<iArrowToSchedule<<" of the list: "<<arrows[arrowToSchedule].from<<" -> "<<arrows[arrowToSchedule].to<<endl;
-	arrowComputed[arrowToSchedule]=true;
-	
-	const Arrow& a=arrows[arrowToSchedule];
-	nDepsComputed[a.to]++;
-	nUsersComputed[a.from]++;
-	
-	if(not jHasBeenScheduled[a.from])
-	  pressure+=junctions[a.from].cost;
-	jHasBeenScheduled[a.from]=true;
-	one needs to think in terms of reducible sequences of nodes. MacroNode. The junction is a false track
-	for(const int& d : junctions[a.to].deps)
-	  if(nUsersComputed[d]==junctions[d].users.size())
-	    {
-	      cout<<"Completed junction "<<d<<endl;
-	      pressure-=junctions[d].cost;
-	    }
-	
-	cout<<"pressure: "<<pressure<<endl;
-	// for(int i=0;i<nDepsComputed.size();i++)
-	//   cout<<i<<" "<<nDepsComputed[i]<<endl;
-      }
-    
-    // auto tmap=jmap;
-    // std::vector<std::pair<int,int>> arrows;
-    // for(int iArr=0;iArr<nArr;iArr++)
+    // cout<<"Number of junctions: "<<jmap.size()<<endl;
+    // int nArr{};
+    // for(const auto& [j,uL] : jmap)
     //   {
-    // 	std::vector<int> readyList;
+    // 	cout<<j<<" costs : "<<jcostMap[j]<<" and has "<<uL.size()<<endl;
+    // 	// for(const int& u : uL)
+    // 	//   cout<<"  "<<u<<endl;
+    // 	nArr+=uL.size();
+    //   }
+    // cout<<"Number of different arrows: "<<nArr<<endl;
+    
+    // std::map<int,int> labels;
+    // for(const auto& [j,uL] : jmap)
+    //   {
+    // 	if(not labels.contains(j))
+    // 	  labels[j]=labels.size();
 	
-    // 	for(const auto& [n,_] : jmap)
-    // 	  if(std::find(scheduled.begin(),scheduled.end(),n)==scheduled.end())
-    // 	    {
-    // 	      bool isReady=true;
-    // 	      for(const auto& [m,uL] : jmap)
-    // 		for(const auto& u : uL)
-    // 		  if(u==n and std::find(scheduled.begin(),scheduled.end(),u)==scheduled.end())
-    // 		    isReady=false;
-	      
-    // 	      if(isReady)
-    // 		readyList.push_back(n);
-    // 	    }
-	
-    // 	cout<<"NReady: "<<readyList.size()<<endl;
-    // 	for(const int& ready : readyList)
-    // 	  cout<<" "<<ready<<endl;
-	
-	
-    // 	cout<<"Scheduling "<<toSchedule<<endl;
-    // 	scheduled.push_back(toSchedule);
+    // 	for(const auto& [u,_,cost] : uL)
+    // 	  if(not labels.contains(u))
+    // 	    labels[u]=labels.size();
     //   }
     
-    cout<<"===== *** END list of all junctions *** ======"<<endl;
+    // for(const auto& [id,label] : labels)
+    //   cout<<id<<" is labelled "<<label<<endl;
+    
+    // struct Arrow
+    // {
+    //   int from;
+      
+    //   int to;
+    // };
+    
+    // std::vector<Arrow> arrows;
+    // for(const auto& [id,uL] : jmap)
+    //   for(const auto& [u,_,__] : uL)
+    // 	arrows.emplace_back(labels[id],labels[u]);
+    
+    // cout<<"Arrows:"<<endl;
+    // for(const auto& [from,to] : arrows)
+    //   cout<<" "<<from<<" -> "<<to<<endl;
+    
+    // struct Junction
+    // {
+    //   std::vector<int> users;
+      
+    //   std::vector<int> deps;
+      
+    //   int cost;
+    // };
+    
+    // std::vector<Junction> junctions(labels.size());
+    // for(const auto& [from,to] : arrows)
+    //   {
+    // 	junctions[from].users.push_back(to);
+    // 	junctions[to].deps.push_back(from);
+    //   }
+    
+    // for(const auto& [j,cost] : jcostMap)
+    //   junctions[labels[j]].cost=cost;
+    
+    // // for(int i{};Junction& j : junctions)
+    // //   j.id=i++;
+    
+    // // for(const auto& [j,uL] : jmap)
+    // //   for(const int& u : uL)
+    // // 	{
+    // // 	  junctions[labels[j]].users.push_back(u);
+    // // 	  junctions[labels[u]].deps.push_back(j);
+    // // 	}
+    
+    // cout<<"Junctions: "<<endl;
+    // for(int id{};const auto& [uL,dL,cost] : junctions)
+    //   {
+    // 	cout<<" id: "<<id++<<endl;
+    // 	cout<<" depends from: "<<endl;
+    // 	for(const int& d : dL)
+    // 	  cout<<"   "<<d<<endl;
+    // 	cout<<" users: "<<endl;
+    // 	for(const int& u : uL)
+    // 	  cout<<"   "<<u<<endl;
+    // 	cout<<" costs: "<<cost<<endl;
+    //   }
+    
+    // std::vector<int> nDepsComputed(junctions.size());
+    
+    // std::vector<int> nUsersComputed(junctions.size());
+    
+    // std::vector<int> jHasBeenScheduled(junctions.size());
+    
+    // // std::set<int> liveJunctions;
+    
+    // std::vector<bool> arrowComputed(arrows.size());
+    
+    // std::mt19937_64 gen(343464356);
+    // int pressure{};
+    // for(int i=0;i<(int)arrows.size();i++)
+    //   {
+    // 	std::vector<int> iReadyArrow;
+	
+    // 	for(size_t iarrow{};iarrow<arrows.size();iarrow++)
+    // 	  if(not arrowComputed[iarrow])
+    // 	    {
+    // 	      const auto& [from,to]=arrows[iarrow];
+    // 	      if(nDepsComputed[from]==(int)junctions[from].deps.size())
+    // 		iReadyArrow.push_back(iarrow);
+    // 	    }
+	
+    // 	cout<<"Ready arrows:"<<endl;
+    // 	for(const int& iReady : iReadyArrow)
+    // 	  {
+    // 	    const auto& [from,to]=arrows[iReady];
+    // 	    cout<<from<<" -> "<<to<<endl;
+    // 	  }
+	
+    // 	const int iArrowToSchedule=
+    // 	  std::uniform_int_distribution<>(0,iReadyArrow.size()-1)(gen);
+    // 	const int arrowToSchedule=
+    // 	  iReadyArrow[iArrowToSchedule];
+    // 	cout<<"Scheduling "<<iArrowToSchedule<<" of the list: "<<arrows[arrowToSchedule].from<<" -> "<<arrows[arrowToSchedule].to<<endl;
+    // 	arrowComputed[arrowToSchedule]=true;
+	
+    // 	const Arrow& a=arrows[arrowToSchedule];
+    // 	nDepsComputed[a.to]++;
+    // 	nUsersComputed[a.from]++;
+	
+    // 	if(not jHasBeenScheduled[a.from])
+    // 	  pressure+=junctions[a.from].cost;
+    // 	jHasBeenScheduled[a.from]=true;
+	
+    // 	for(const int& d : junctions[a.to].deps)
+    // 	  if(nUsersComputed[d]==junctions[d].users.size())
+    // 	    {
+    // 	      cout<<"Completed junction "<<d<<endl;
+    // 	      pressure-=junctions[d].cost;
+    // 	    }
+	
+    // 	cout<<"pressure: "<<pressure<<endl;
+    // 	// for(int i=0;i<nDepsComputed.size();i++)
+    // 	//   cout<<i<<" "<<nDepsComputed[i]<<endl;
+    //   }
+    
+    // // auto tmap=jmap;
+    // // std::vector<std::pair<int,int>> arrows;
+    // // for(int iArr=0;iArr<nArr;iArr++)
+    // //   {
+    // // 	std::vector<int> readyList;
+	
+    // // 	for(const auto& [n,_] : jmap)
+    // // 	  if(std::find(scheduled.begin(),scheduled.end(),n)==scheduled.end())
+    // // 	    {
+    // // 	      bool isReady=true;
+    // // 	      for(const auto& [m,uL] : jmap)
+    // // 		for(const auto& u : uL)
+    // // 		  if(u==n and std::find(scheduled.begin(),scheduled.end(),u)==scheduled.end())
+    // // 		    isReady=false;
+	      
+    // // 	      if(isReady)
+    // // 		readyList.push_back(n);
+    // // 	    }
+	
+    // // 	cout<<"NReady: "<<readyList.size()<<endl;
+    // // 	for(const int& ready : readyList)
+    // // 	  cout<<" "<<ready<<endl;
+	
+	
+    // // 	cout<<"Scheduling "<<toSchedule<<endl;
+    // // 	scheduled.push_back(toSchedule);
+    // //   }
+    
+    // cout<<"===== *** END list of all junctions *** ======"<<endl;
     
     
     std::vector<Node*> readyNodes;
