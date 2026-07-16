@@ -185,7 +185,7 @@ void smeBox()
 	 &propSameTime,
 	 &eta](const Momentum& momSo) -> Line
 	{
-	  const Oper pi1=getOp(momSo);
+	  const Oper pi1=getOp(2*momSo);
 	  const Oper pi2=pi1.dag();
 	  return {pi2*P5*DeltaT{.t=0}*propSameTime.dag()*pi1*eta};
 	};
@@ -233,7 +233,7 @@ void smeBox()
 	 &nazIncl,
 	 &t0](const Momentum& momSi)
 	{
-	  const Oper pi1=getOp(momSi);
+	  const Oper pi1=getOp(2*momSi);
 	  const Oper pi2=pi1.dag();
 	      
 	  auto getT=
@@ -293,6 +293,7 @@ void smeDir()
  
   Run run;
   debugPrepare=true;
+  run.debugPressure=true;
   
   auto& dir=run.getTracer("dir");
   dir.addGammas(5,5);
@@ -302,7 +303,7 @@ void smeDir()
   current.addGammas(2,2);
   current.addGammas(3,3);
   
-  for(int iMom=0;iMom<5;iMom++)
+  for(size_t iMom=0;iMom<momList.size();iMom++)
     {
       const auto [source,sink]=getAllPerms(momList[iMom]);
       
