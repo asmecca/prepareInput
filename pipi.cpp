@@ -310,21 +310,26 @@ void smeDir()
       
       for(size_t iSo{};const Momentum& momSo : source)
 	{
-	  for(size_t iSi{};const Momentum& momSi : sink)
+	  const Phase phSoM{.mom=-momSo/1.0};
+	  const Phase phSoP{.mom=momSo/1.0};
+	  const Smear smSoP{.kappa=0.4,.n=80,.mom=momSo/1.0};
+	  const Smear smSoM{.kappa=0.4,.n=80,.mom=-momSo/1.0};
+	  
+	  for(int iMom2=0;iMom2<5;iMom2++)
 	    {
-	      const Phase phSoM{.mom=-momSo/1.0};
-	      const Phase phSoP{.mom=momSo/1.0};
-	      const Smear smSoP{.kappa=0.4,.n=80,.mom=momSo/1.0};
-	      const Smear smSoM{.kappa=0.4,.n=80,.mom=-momSo/1.0};
-	      const Phase phSiM{.mom=-momSi/1.0};
-	      const Phase phSiP{.mom=momSi/1.0};
-	      const Smear smSiP{.kappa=0.4,.n=80,.mom=momSi/1.0};
-	      const Smear smSiM{.kappa=0.4,.n=80,.mom=-momSi/1.0};
-	      const Line bwLine(phSiM*smSiM*prop0*smSoP*phSoM*eta,std::format("bw{}_{}_{}",iMom,iSo,iSi));
-	      const Line fwLine(phSiP*smSiP*prop0*smSoM*phSoP*eta,std::format("fw{}_{}_{}",iMom,iSo,iSi));
-	      dir.tr(bwLine,fwLine);
+	      const auto [source2,sink2]=getAllPerms(momList[iMom2]);
+	      for(size_t iSi{};const Momentum& momSi : sink2)
+		{
+		  const Phase phSiM{.mom=-momSi/1.0};
+		  const Phase phSiP{.mom=momSi/1.0};
+		  const Smear smSiP{.kappa=0.4,.n=80,.mom=momSi/1.0};
+		  const Smear smSiM{.kappa=0.4,.n=80,.mom=-momSi/1.0};
+		  const Line bwLine(phSiM*smSiM*prop0*smSoP*phSoM*eta,std::format("bw{}_{}_So_{}_{}_Si",iMom,iSo,iMom2,iSi));
+		  const Line fwLine(phSiP*smSiP*prop0*smSoM*phSoP*eta,std::format("fw{}_{}_So_{}_{}_Si",iMom,iSo,iMom2,iSi));
+		  dir.tr(bwLine,fwLine);
 	      
-	      iSi++;
+		  iSi++;
+		}
 	    }
 	  iSo++;
 	}
