@@ -165,13 +165,14 @@ void smeBox()
   
   size_t totalCost{1};
   
+  /// Needs to pass the momentum number i.e 1,0,0 for 2pi/L,0,0
   auto getOp=
     [](const Momentum& mom)
     {
       const Phase phPi1{.mom=2*mom};
       
-      const Smear smPi1q{.kappa=0.4,.n=80,.mom=mom/1.0};
-      const Smear smPi1qBar{.kappa=0.4,.n=80,.mom=-mom/1.0};
+      const Smear smPi1q{.kappa=0.4,.n=80,.mom=mom};
+      const Smear smPi1qBar{.kappa=0.4,.n=80,.mom=-mom};
       
       return smPi1qBar*phPi1*smPi1q;
     };
@@ -205,7 +206,7 @@ void smeBox()
       cout<<"cost: "<<cost<<endl;
       totalCost+=cost;
       
-      std::optional<Line> sameTimeLine; 
+      std::optional<Line> sameTimeLine;
       for(const Momentum& signedMom : source)
 	{
 	  const Line curContr=
@@ -217,7 +218,6 @@ void smeBox()
 	    sameTimeLine=curContr;
 	}
       
-      //bwLine.emplace_back(propDiffTime*(*sameTimeLine),std::format("bw{}",iMom));
       bwLine.emplace_back(propDiffTime.dag()*(*sameTimeLine),std::format("bw{}",iMom));
       
       /////////////////////////////////////////////////////////////////
@@ -286,15 +286,15 @@ void smeBox()
   print(run);
 }
 
-
 void smeDir()
 {
   const Source eta(0);
   const Prop prop1{.kappa=0.1394267,.mass=0.00066690,.r=+1,.charge=0.0,.residue=1e-20};
   const Prop prop0{.kappa=0.1394267,.mass=0.00066690,.r=-1,.charge=0.0,.residue=1e-20};
- 
+  
   Run run;
-  debugPrepare=true;
+  //debugPrepare=true;
+  run.debugPressure=true;
   
   auto& dir=run.getTracer("dir");
   dir.addGammas(5,5);
@@ -304,7 +304,7 @@ void smeDir()
   current.addGammas(2,2);
   current.addGammas(3,3);
   
-  for(int iMom=0;iMom<5;iMom++)
+  for(size_t iMom=0;iMom<momList.size();iMom++)
     {
       const auto [source,sink]=getAllPerms(momList[iMom]);
       
@@ -317,16 +317,17 @@ void smeDir()
 	  
 	  for(int iMom2=0;iMom2<5;iMom2++)
 	    {
-	      const auto [source2,sink2]=getAllPerms(momList[iMom2]);
-	      for(size_t iSi{};const Momentum& momSi : sink2)
-		{
-		  const Phase phSiM{.mom=-momSi/1.0};
-		  const Phase phSiP{.mom=momSi/1.0};
-		  const Smear smSiP{.kappa=0.4,.n=80,.mom=momSi/1.0};
-		  const Smear smSiM{.kappa=0.4,.n=80,.mom=-momSi/1.0};
-		  const Line bwLine(phSiM*smSiM*prop0*smSoP*phSoM*eta,std::format("bw{}_{}_So_{}_{}_Si",iMom,iSo,iMom2,iSi));
-		  const Line fwLine(phSiP*smSiP*prop0*smSoM*phSoP*eta,std::format("fw{}_{}_So_{}_{}_Si",iMom,iSo,iMom2,iSi));
-		  dir.tr(bwLine,fwLine);
+	      const Phase phSoM{.mom=-momSo};
+	      const Phase phSoP{.mom=momSo};
+	      const Smear smSoP{.kappa=0.4,.n=80,.mom=momSo};
+	      const Smear smSoM{.kappa=0.4,.n=80,.mom=-momSo};
+	      const Phase phSiM{.mom=-momSi};
+	      const Phase phSiP{.mom=momSi};
+	      const Smear smSiP{.kappa=0.4,.n=80,.mom=momSi};
+	      const Smear smSiM{.kappa=0.4,.n=80,.mom=-momSi};
+	      const Line bwLine(phSiM*smSiM*prop0*smSoP*phSoM*eta,std::format("bw{}_{}_{}",iMom,iSo,iSi));
+	      const Line fwLine(phSiP*smSiP*prop0*smSoM*phSoP*eta,std::format("fw{}_{}_{}",iMom,iSo,iSi));
+	      dir.tr(bwLine,fwLine);
 	      
 		  iSi++;
 		}
@@ -345,15 +346,14 @@ void smeDir()
   print(run);
 }
 
-
 int main()
 {
   // comboA();
   // comboB();
   
   //localBox();
-  //smeBox();
-  smeDir();
+  smeBox();
+  //smeDir();
   //box();
   //dir3();
   
