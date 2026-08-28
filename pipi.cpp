@@ -310,7 +310,12 @@ void smeDir()
       
       for(size_t iSo{};const Momentum& momSo : source)
 	{
-	  for(size_t iSi{};const Momentum& momSi : sink)
+	  const Phase phSoM{.mom=-momSo/1.0};
+	  const Phase phSoP{.mom=momSo/1.0};
+	  const Smear smSoP{.kappa=0.4,.n=80,.mom=momSo/1.0};
+	  const Smear smSoM{.kappa=0.4,.n=80,.mom=-momSo/1.0};
+	  
+	  for(int iMom2=0;iMom2<5;iMom2++)
 	    {
 	      const Phase phSoM{.mom=-momSo};
 	      const Phase phSoP{.mom=momSo};
@@ -324,7 +329,8 @@ void smeDir()
 	      const Line fwLine(phSiP*smSiP*prop0*smSoM*phSoP*eta,std::format("fw{}_{}_{}",iMom,iSo,iSi));
 	      dir.tr(bwLine,fwLine);
 	      
-	      iSi++;
+		  iSi++;
+		}
 	    }
 	  iSo++;
 	}
