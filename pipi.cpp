@@ -289,8 +289,8 @@ void smeBox()
 void smeDir()
 {
   const Source eta(0);
-  const Prop prop1{.kappa=0.1394267,.mass=0.00066690,.r=+0,.charge=0.0,.residue=1e-20};
-  const Prop prop0{.kappa=0.1394267,.mass=0.00066690,.r=-0,.charge=0.0,.residue=1e-20};
+  const Prop prop1{.kappa=0.1394267,.mass=0.00066690,.r=+1,.charge=0.0,.residue=1e-20};
+  const Prop prop0{.kappa=0.1394267,.mass=0.00066690,.r=-1,.charge=0.0,.residue=1e-20};
   
   Run run;
   //debugPrepare=true;
