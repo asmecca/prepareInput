@@ -304,30 +304,35 @@ void smeDir()
   current.addGammas(2,2);
   current.addGammas(3,3);
   
-  for(size_t iMom=0;iMom<momList.size();iMom++)
+  for(int iMom=0;iMom<5;iMom++)
     {
-      const auto [source,sink]=getAllPerms(momList[iMom]);
+      const auto [sink,source]=getAllPerms(momList[iMom]);
       
       for(size_t iSo{};const Momentum& momSo : source)
 	{
+	  /*
 	  const Phase phSoM{.mom=-momSo/1.0};
 	  const Phase phSoP{.mom=momSo/1.0};
 	  const Smear smSoP{.kappa=0.4,.n=80,.mom=momSo/1.0};
 	  const Smear smSoM{.kappa=0.4,.n=80,.mom=-momSo/1.0};
+	  */
+	  const Phase phSoM{.mom=momSo/1.0};
+	  const Phase phSoP{.mom=-momSo/1.0};
+	  const Smear smSoP{.kappa=0.4,.n=80,.mom=-momSo/1.0};
+	  const Smear smSoM{.kappa=0.4,.n=80,.mom=momSo/1.0};
 	  
-	  for(int iMom2=0;iMom2<5;iMom2++)
+	  for(int iMom2=iMom;iMom2<5;iMom2++)
 	    {
-	      const Phase phSoM{.mom=-momSo};
-	      const Phase phSoP{.mom=momSo};
-	      const Smear smSoP{.kappa=0.4,.n=80,.mom=momSo};
-	      const Smear smSoM{.kappa=0.4,.n=80,.mom=-momSo};
-	      const Phase phSiM{.mom=-momSi};
-	      const Phase phSiP{.mom=momSi};
-	      const Smear smSiP{.kappa=0.4,.n=80,.mom=momSi};
-	      const Smear smSiM{.kappa=0.4,.n=80,.mom=-momSi};
-	      const Line bwLine(phSiM*smSiM*prop0*smSoP*phSoM*eta,std::format("bw{}_{}_{}",iMom,iSo,iSi));
-	      const Line fwLine(phSiP*smSiP*prop0*smSoM*phSoP*eta,std::format("fw{}_{}_{}",iMom,iSo,iSi));
-	      dir.tr(bwLine,fwLine);
+	      const auto [sink2,source2]=getAllPerms(momList[iMom2]);
+	      for(size_t iSi{};const Momentum& momSi : sink2)
+		{
+		  const Phase phSiM{.mom=-momSi};
+		  const Phase phSiP{.mom=momSi};
+		  const Smear smSiP{.kappa=0.4,.n=80,.mom=momSi};
+		  const Smear smSiM{.kappa=0.4,.n=80,.mom=-momSi};
+		  const Line bwLine(phSiM*smSiM*prop1*smSoP*phSoM*eta,std::format("bw{}_{}_So_{}_{}_Si",iMom,iSo,iMom2,iSi));
+		  const Line fwLine(phSiP*smSiP*prop1*smSoM*phSoP*eta,std::format("fw{}_{}_So_{}_{}_Si",iMom,iSo,iMom2,iSi));
+		  dir.tr(bwLine,fwLine);
 	      
 		  iSi++;
 		}
@@ -352,8 +357,8 @@ int main()
   // comboB();
   
   //localBox();
-  smeBox();
-  //smeDir();
+  //smeBox();
+  smeDir();
   //box();
   //dir3();
   
