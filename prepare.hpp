@@ -1794,6 +1794,7 @@ struct Run
 		  [](const Node* a,
 		     const Node* b)
 		  {
+		    return a->id<b->id;
 		    return a->readyness()<b->readyness();
 		  });
 	
